@@ -1,678 +1,335 @@
 import React, { useState } from 'react';
 
 const AuditForm = () => {
-  const [activeTab, setActiveTab] = useState(0);
-  const [formData, setFormData] = useState({
-    // Section 1: Model Information
-    modelName: '',
-    modelType: '',
-    useCase: 'Loan/Credit Approval',
-    deploymentDate: '',
-    riskClassification: 'HIGH RISK - EU AI Act Article 6',
-    
-    // Section 2: Features & Protected Attributes
-    features: {
-      age: { selected: false, protected: true, proxy: false, proxyFor: '' },
-      gender: { selected: false, protected: true, proxy: false, proxyFor: '' },
-      income: { selected: false, protected: false, proxy: false, proxyFor: '' },
-      zip_code: { selected: false, protected: false, proxy: true, proxyFor: 'race' },
-      occupation: { selected: false, protected: false, proxy: true, proxyFor: 'possible' },
-      credit_history: { selected: false, protected: false, proxy: false, proxyFor: '' }
-    },
-    customFeatures: [],
-    
-    // Section 3: Accountability (RACI)
-    modelDeveloperName: '',
-    modelDeveloperEmail: '',
-    approvalAuthorityName: '',
-    approvalAuthorityRole: '',
-    monitorOwnerName: '',
-    monitorOwnerDepartment: '',
-    complaintHandlerName: '',
-    complaintHandlerContact: '',
-    lastReviewDate: '',
-    
-    // Section 4: Data Information
-    trainingDataStartYear: '',
-    trainingDataEndYear: '',
-    dataSource: '',
-    recordCount: '',
-    dataGapsLimitations: ''
+  const [uploadMethod, setUploadMethod] = useState('csv'); // 'csv' or 'manual'
+  const [csvFile, setCsvFile] = useState(null);
+  const [csvColumns, setCsvColumns] = useState([]);
+  const [resultColumn, setResultColumn] = useState('');
+  
+  // Manual input state
+  const [genderData, setGenderData] = useState({
+    male: { total: '', approved: '' },
+    female: { total: '', approved: '' }
   });
+  
+  const [ethnicGroups, setEthnicGroups] = useState([
+    { name: '', total: '', approved: '' }
+  ]);
+  
+  const [zipCodes, setZipCodes] = useState([
+    { name: '', total: '', approved: '' }
+  ]);
 
-  const [customFeatureName, setCustomFeatureName] = useState('');
-  const [customFeatureProtected, setCustomFeatureProtected] = useState(false);
-  const [customFeatureProxy, setCustomFeatureProxy] = useState(false);
-  const [customFeatureProxyFor, setCustomFeatureProxyFor] = useState('');
-  const [submitStatus, setSubmitStatus] = useState({ type: '', message: '' });
-
-  const tabs = [
-    'Model Information',
-    'Features & Protected Attributes',
-    'Accountability (RACI)',
-    'Data Information'
-  ];
-
-  const modelTypes = [
-    'XGBoost',
-    'Random Forest',
-    'Neural Network',
-    'Logistic Regression',
-    'Rule-based'
-  ];
-
-  const dataSources = [
-    'Internal historical',
-    'External bureau',
-    'Mixed'
-  ];
-
-  const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  // Calculate rate and DI
+  const calculateRate = (approved, total) => {
+    if (!approved || !total || total === 0) return 0;
+    return (parseFloat(approved) / parseFloat(total) * 100).toFixed(1);
   };
 
-  const handleFeatureToggle = (featureName) => {
-    setFormData(prev => ({
-      ...prev,
-      features: {
-        ...prev.features,
-        [featureName]: {
-          ...prev.features[featureName],
-          selected: !prev.features[featureName].selected
-        }
-      }
-    }));
+  const calculateDI = () => {
+    const maleRate = parseFloat(genderData.male.approved) / parseFloat(genderData.male.total);
+    const femaleRate = parseFloat(genderData.female.approved) / parseFloat(genderData.female.total);
+    
+    if (!maleRate || !femaleRate) return null;
+    
+    const di = femaleRate / maleRate;
+    return di.toFixed(2);
   };
 
-  const handleAddCustomFeature = () => {
-    if (customFeatureName.trim()) {
-      const newFeature = {
-        name: customFeatureName.trim(),
-        selected: true,
-        protected: customFeatureProtected,
-        proxy: customFeatureProxy,
-        proxyFor: customFeatureProxyFor.trim()
-      };
-      
-      setFormData(prev => ({
-        ...prev,
-        customFeatures: [...prev.customFeatures, newFeature]
-      }));
-      
-      // Reset custom feature inputs
-      setCustomFeatureName('');
-      setCustomFeatureProtected(false);
-      setCustomFeatureProxy(false);
-      setCustomFeatureProxyFor('');
+  const getDIStatus = (di) => {
+    if (!di) return null;
+    if (di >= 0.8) return { icon: '🟢', label: 'COMPLIANT', class: 'status-compliant' };
+    if (di >= 0.7) return { icon: '🟡', label: 'WARNING', class: 'status-warning' };
+    return { icon: '🔴', label: 'VIOLATION', class: 'status-violation' };
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setCsvFile(file);
+      // Simulate column detection
+      const mockColumns = [
+        { name: 'age', type: 'normal', icon: '✅' },
+        { name: 'gender', type: 'protected', icon: '🔴' },
+        { name: 'income', type: 'normal', icon: '✅' },
+        { name: 'zip_code', type: 'proxy', icon: '🟡' },
+        { name: 'loan_approved', type: 'result', icon: '🎯' }
+      ];
+      setCsvColumns(mockColumns);
+      setResultColumn('loan_approved');
     }
   };
 
-  const handleRemoveCustomFeature = (index) => {
-    setFormData(prev => ({
-      ...prev,
-      customFeatures: prev.customFeatures.filter((_, i) => i !== index)
-    }));
+  const addEthnicGroup = () => {
+    setEthnicGroups([...ethnicGroups, { name: '', total: '', approved: '' }]);
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitStatus({ type: 'loading', message: 'Generating audit report...' });
-
-    try {
-      // Prepare selected features
-      const selectedFeatures = [];
-      Object.entries(formData.features).forEach(([name, data]) => {
-        if (data.selected) {
-          selectedFeatures.push({
-            name,
-            protected: data.protected,
-            proxy: data.proxy,
-            proxyFor: data.proxyFor
-          });
-        }
-      });
-
-      // Add custom features
-      formData.customFeatures.forEach(feature => {
-        if (feature.selected) {
-          selectedFeatures.push({
-            name: feature.name,
-            protected: feature.protected,
-            proxy: feature.proxy,
-            proxyFor: feature.proxyFor
-          });
-        }
-      });
-
-      const auditData = {
-        modelInfo: {
-          name: formData.modelName,
-          type: formData.modelType,
-          useCase: formData.useCase,
-          deploymentDate: formData.deploymentDate,
-          riskClassification: formData.riskClassification
-        },
-        features: selectedFeatures,
-        accountability: {
-          modelDeveloper: {
-            name: formData.modelDeveloperName,
-            email: formData.modelDeveloperEmail
-          },
-          approvalAuthority: {
-            name: formData.approvalAuthorityName,
-            role: formData.approvalAuthorityRole
-          },
-          monitorOwner: {
-            name: formData.monitorOwnerName,
-            department: formData.monitorOwnerDepartment
-          },
-          complaintHandler: {
-            name: formData.complaintHandlerName,
-            contact: formData.complaintHandlerContact
-          },
-          lastReviewDate: formData.lastReviewDate
-        },
-        dataInfo: {
-          trainingPeriod: {
-            start: formData.trainingDataStartYear,
-            end: formData.trainingDataEndYear
-          },
-          dataSource: formData.dataSource,
-          recordCount: formData.recordCount,
-          dataGapsLimitations: formData.dataGapsLimitations
-        }
-      };
-
-      const response = await fetch('/api/audit', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(auditData)
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        setSubmitStatus({ 
-          type: 'success', 
-          message: 'Audit report generated successfully! Check the backend for results.' 
-        });
-      } else {
-        const error = await response.json();
-        setSubmitStatus({ 
-          type: 'error', 
-          message: `Error: ${error.error || 'Failed to generate audit report'}` 
-        });
-      }
-    } catch (error) {
-      setSubmitStatus({ 
-        type: 'error', 
-        message: `Network error: ${error.message}` 
-      });
-    }
+  const removeEthnicGroup = (index) => {
+    setEthnicGroups(ethnicGroups.filter((_, i) => i !== index));
   };
 
-  const renderSection1 = () => (
-    <div className="form-section">
-      <h2>Model Information</h2>
-      <div className="form-grid">
-        <div className="form-group">
-          <label htmlFor="modelName">Model Name *</label>
-          <input
-            type="text"
-            id="modelName"
-            value={formData.modelName}
-            onChange={(e) => handleInputChange('modelName', e.target.value)}
-            placeholder="e.g., CreditScore_XGB_v2.1"
-            required
-          />
-        </div>
+  const updateEthnicGroup = (index, field, value) => {
+    const updated = [...ethnicGroups];
+    updated[index][field] = value;
+    setEthnicGroups(updated);
+  };
 
-        <div className="form-group">
-          <label htmlFor="modelType">Model Type *</label>
-          <select
-            id="modelType"
-            value={formData.modelType}
-            onChange={(e) => handleInputChange('modelType', e.target.value)}
-            required
-          >
-            <option value="">Select model type</option>
-            {modelTypes.map(type => (
-              <option key={type} value={type}>{type}</option>
-            ))}
-          </select>
-        </div>
+  const addZipCode = () => {
+    setZipCodes([...zipCodes, { name: '', total: '', approved: '' }]);
+  };
 
-        <div className="form-group">
-          <label htmlFor="useCase">Use Case</label>
-          <input
-            type="text"
-            id="useCase"
-            value={formData.useCase}
-            readOnly
-            className="readonly-field"
-          />
-        </div>
+  const removeZipCode = (index) => {
+    setZipCodes(zipCodes.filter((_, i) => i !== index));
+  };
 
-        <div className="form-group">
-          <label htmlFor="deploymentDate">Deployment Date *</label>
-          <input
-            type="date"
-            id="deploymentDate"
-            value={formData.deploymentDate}
-            onChange={(e) => handleInputChange('deploymentDate', e.target.value)}
-            required
-          />
-        </div>
+  const updateZipCode = (index, field, value) => {
+    const updated = [...zipCodes];
+    updated[index][field] = value;
+    setZipCodes(updated);
+  };
 
-        <div className="form-group full-width">
-          <label htmlFor="riskClassification">Risk Classification</label>
-          <input
-            type="text"
-            id="riskClassification"
-            value={formData.riskClassification}
-            readOnly
-            className="readonly-field risk-high"
-          />
-          <p className="field-note">
-            This system is classified as HIGH RISK under EU AI Act Article 6 due to its use in creditworthiness assessment.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+  const handleGenerateReport = () => {
+    alert('Generating audit report with current data...');
+  };
 
-  const renderSection2 = () => (
-    <div className="form-section">
-      <h2>Features & Protected Attributes</h2>
-      <p className="section-description">
-        Select the features used by your model. Protected attributes and proxy variables are automatically flagged.
-      </p>
-      
-      <div className="features-list">
-        <div className="features-header">
-          <span className="col-feature">Feature Name</span>
-          <span className="col-protected">Protected</span>
-          <span className="col-proxy">Proxy</span>
-          <span className="col-select">Use in Model</span>
-        </div>
-        
-        {Object.entries(formData.features).map(([name, data]) => (
-          <div key={name} className="feature-row">
-            <span className="col-feature">{name}</span>
-            <span className="col-protected">
-              {data.protected ? (
-                <span className="badge badge-protected">YES</span>
-              ) : (
-                <span className="badge badge-normal">NO</span>
-              )}
-            </span>
-            <span className="col-proxy">
-              {data.proxy ? (
-                <span className="badge badge-warning">YES → {data.proxyFor}</span>
-              ) : (
-                <span className="badge badge-normal">NO</span>
-              )}
-            </span>
-            <span className="col-select">
-              <input
-                type="checkbox"
-                checked={data.selected}
-                onChange={() => handleFeatureToggle(name)}
-              />
-            </span>
-          </div>
-        ))}
-
-        {formData.customFeatures.map((feature, index) => (
-          <div key={`custom-${index}`} className="feature-row custom-feature">
-            <span className="col-feature">{feature.name}</span>
-            <span className="col-protected">
-              {feature.protected ? (
-                <span className="badge badge-protected">YES</span>
-              ) : (
-                <span className="badge badge-normal">NO</span>
-              )}
-            </span>
-            <span className="col-proxy">
-              {feature.proxy ? (
-                <span className="badge badge-warning">YES → {feature.proxyFor}</span>
-              ) : (
-                <span className="badge badge-normal">NO</span>
-              )}
-            </span>
-            <span className="col-select">
-              <button
-                type="button"
-                className="btn-remove"
-                onClick={() => handleRemoveCustomFeature(index)}
-              >
-                Remove
-              </button>
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <div className="add-custom-feature">
-        <h3>Add Custom Feature</h3>
-        <div className="custom-feature-form">
-          <input
-            type="text"
-            placeholder="Feature name"
-            value={customFeatureName}
-            onChange={(e) => setCustomFeatureName(e.target.value)}
-          />
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={customFeatureProtected}
-              onChange={(e) => setCustomFeatureProtected(e.target.checked)}
-            />
-            Protected attribute
-          </label>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={customFeatureProxy}
-              onChange={(e) => setCustomFeatureProxy(e.target.checked)}
-            />
-            Proxy variable
-          </label>
-          {customFeatureProxy && (
-            <input
-              type="text"
-              placeholder="Proxy for (e.g., race, gender)"
-              value={customFeatureProxyFor}
-              onChange={(e) => setCustomFeatureProxyFor(e.target.value)}
-            />
-          )}
-          <button
-            type="button"
-            className="btn-add"
-            onClick={handleAddCustomFeature}
-          >
-            Add Feature
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderSection3 = () => (
-    <div className="form-section">
-      <h2>Accountability (RACI Matrix)</h2>
-      <p className="section-description">
-        Define the responsible parties for model governance and compliance.
-      </p>
-      
-      <div className="form-grid">
-        <div className="form-group-header full-width">
-          <h3>Model Developer (Responsible)</h3>
-        </div>
-        <div className="form-group">
-          <label htmlFor="modelDeveloperName">Full Name *</label>
-          <input
-            type="text"
-            id="modelDeveloperName"
-            value={formData.modelDeveloperName}
-            onChange={(e) => handleInputChange('modelDeveloperName', e.target.value)}
-            placeholder="John Doe"
-            required
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="modelDeveloperEmail">Email *</label>
-          <input
-            type="email"
-            id="modelDeveloperEmail"
-            value={formData.modelDeveloperEmail}
-            onChange={(e) => handleInputChange('modelDeveloperEmail', e.target.value)}
-            placeholder="john.doe@company.com"
-            required
-          />
-        </div>
-
-        <div className="form-group-header full-width">
-          <h3>Approval Authority (Accountable)</h3>
-        </div>
-        <div className="form-group">
-          <label htmlFor="approvalAuthorityName">Full Name *</label>
-          <input
-            type="text"
-            id="approvalAuthorityName"
-            value={formData.approvalAuthorityName}
-            onChange={(e) => handleInputChange('approvalAuthorityName', e.target.value)}
-            placeholder="Jane Smith"
-            required
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="approvalAuthorityRole">Role/Title *</label>
-          <input
-            type="text"
-            id="approvalAuthorityRole"
-            value={formData.approvalAuthorityRole}
-            onChange={(e) => handleInputChange('approvalAuthorityRole', e.target.value)}
-            placeholder="Chief Risk Officer"
-            required
-          />
-        </div>
-
-        <div className="form-group-header full-width">
-          <h3>Monitor/Owner (Consulted)</h3>
-        </div>
-        <div className="form-group">
-          <label htmlFor="monitorOwnerName">Full Name *</label>
-          <input
-            type="text"
-            id="monitorOwnerName"
-            value={formData.monitorOwnerName}
-            onChange={(e) => handleInputChange('monitorOwnerName', e.target.value)}
-            placeholder="Alice Johnson"
-            required
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="monitorOwnerDepartment">Department *</label>
-          <input
-            type="text"
-            id="monitorOwnerDepartment"
-            value={formData.monitorOwnerDepartment}
-            onChange={(e) => handleInputChange('monitorOwnerDepartment', e.target.value)}
-            placeholder="Model Risk Management"
-            required
-          />
-        </div>
-
-        <div className="form-group-header full-width">
-          <h3>Complaint Handler (Informed)</h3>
-        </div>
-        <div className="form-group">
-          <label htmlFor="complaintHandlerName">Full Name *</label>
-          <input
-            type="text"
-            id="complaintHandlerName"
-            value={formData.complaintHandlerName}
-            onChange={(e) => handleInputChange('complaintHandlerName', e.target.value)}
-            placeholder="Bob Williams"
-            required
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="complaintHandlerContact">Contact (Email/Phone) *</label>
-          <input
-            type="text"
-            id="complaintHandlerContact"
-            value={formData.complaintHandlerContact}
-            onChange={(e) => handleInputChange('complaintHandlerContact', e.target.value)}
-            placeholder="complaints@company.com"
-            required
-          />
-        </div>
-
-        <div className="form-group full-width">
-          <label htmlFor="lastReviewDate">Last Review Date *</label>
-          <input
-            type="date"
-            id="lastReviewDate"
-            value={formData.lastReviewDate}
-            onChange={(e) => handleInputChange('lastReviewDate', e.target.value)}
-            required
-          />
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderSection4 = () => (
-    <div className="form-section">
-      <h2>Data Information</h2>
-      <p className="section-description">
-        Provide details about the training data used for model development.
-      </p>
-      
-      <div className="form-grid">
-        <div className="form-group-header full-width">
-          <h3>Training Data Period</h3>
-        </div>
-        <div className="form-group">
-          <label htmlFor="trainingDataStartYear">Start Year *</label>
-          <input
-            type="number"
-            id="trainingDataStartYear"
-            value={formData.trainingDataStartYear}
-            onChange={(e) => handleInputChange('trainingDataStartYear', e.target.value)}
-            placeholder="2018"
-            min="1900"
-            max="2100"
-            required
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="trainingDataEndYear">End Year *</label>
-          <input
-            type="number"
-            id="trainingDataEndYear"
-            value={formData.trainingDataEndYear}
-            onChange={(e) => handleInputChange('trainingDataEndYear', e.target.value)}
-            placeholder="2023"
-            min="1900"
-            max="2100"
-            required
-          />
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="dataSource">Data Source *</label>
-          <select
-            id="dataSource"
-            value={formData.dataSource}
-            onChange={(e) => handleInputChange('dataSource', e.target.value)}
-            required
-          >
-            <option value="">Select data source</option>
-            {dataSources.map(source => (
-              <option key={source} value={source}>{source}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="recordCount">Approximate Record Count *</label>
-          <input
-            type="number"
-            id="recordCount"
-            value={formData.recordCount}
-            onChange={(e) => handleInputChange('recordCount', e.target.value)}
-            placeholder="50000"
-            min="0"
-            required
-          />
-        </div>
-
-        <div className="form-group full-width">
-          <label htmlFor="dataGapsLimitations">Known Data Gaps or Limitations *</label>
-          <textarea
-            id="dataGapsLimitations"
-            value={formData.dataGapsLimitations}
-            onChange={(e) => handleInputChange('dataGapsLimitations', e.target.value)}
-            placeholder="Describe any known issues with the training data, such as missing values, underrepresented groups, temporal gaps, or data quality concerns..."
-            rows="6"
-            required
-          />
-          <p className="field-note">
-            Be thorough in documenting data limitations. This is critical for EU AI Act compliance.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+  const di = calculateDI();
+  const diStatus = getDIStatus(di);
 
   return (
-    <div className="audit-form-container">
-      <div className="form-intro">
-        <h2>AI System Audit Questionnaire</h2>
-        <p>Complete all sections to generate a comprehensive audit report for EU AI Act compliance.</p>
+    <div className="page-container">
+      <div className="page-header">
+        <h1>📋 Audit Form</h1>
+        <p>Upload data or manually input metrics for bias analysis</p>
       </div>
 
-      <div className="tabs">
-        {tabs.map((tab, index) => (
-          <button
-            key={index}
-            className={`tab ${activeTab === index ? 'active' : ''}`}
-            onClick={() => setActiveTab(index)}
-            type="button"
-          >
-            <span className="tab-number">{index + 1}</span>
-            <span className="tab-label">{tab}</span>
-          </button>
-        ))}
-      </div>
-
-      <form onSubmit={handleSubmit}>
-        <div className="tab-content">
-          {activeTab === 0 && renderSection1()}
-          {activeTab === 1 && renderSection2()}
-          {activeTab === 2 && renderSection3()}
-          {activeTab === 3 && renderSection4()}
-        </div>
-
-        <div className="form-navigation">
-          {activeTab > 0 && (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => setActiveTab(activeTab - 1)}
-            >
-              Previous
-            </button>
-          )}
-          
-          {activeTab < tabs.length - 1 ? (
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => setActiveTab(activeTab + 1)}
-            >
-              Next
-            </button>
-          ) : (
-            <button type="submit" className="btn-submit">
-              Generate Audit Report
-            </button>
-          )}
-        </div>
-
-        {submitStatus.message && (
-          <div className={`submit-status ${submitStatus.type}`}>
-            {submitStatus.message}
+      <div className="audit-form-content">
+        {/* Section A: Upload CSV/Excel */}
+        <div className="form-section">
+          <h2>Section A: Upload Data File</h2>
+          <div className="upload-area">
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              onChange={handleFileUpload}
+              className="file-input"
+              id="file-upload"
+            />
+            <label htmlFor="file-upload" className="file-upload-label">
+              📁 Choose CSV or Excel File
+            </label>
+            {csvFile && <div className="file-name">Selected: {csvFile.name}</div>}
           </div>
-        )}
-      </form>
+
+          {csvColumns.length > 0 && (
+            <div className="csv-analysis">
+              <h3>Auto-Detected Columns</h3>
+              <div className="columns-list">
+                {csvColumns.map((col, index) => (
+                  <div key={index} className={`column-item column-${col.type}`}>
+                    <span className="column-icon">{col.icon}</span>
+                    <span className="column-name">{col.name}</span>
+                    <span className="column-type">
+                      {col.type === 'protected' && 'Protected Attribute'}
+                      {col.type === 'proxy' && 'Proxy Variable'}
+                      {col.type === 'normal' && 'Normal Feature'}
+                      {col.type === 'result' && 'Result Column'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="result-selection">
+                <label>Select Result Column:</label>
+                <select 
+                  value={resultColumn} 
+                  onChange={(e) => setResultColumn(e.target.value)}
+                  className="result-select"
+                >
+                  {csvColumns.map((col, index) => (
+                    <option key={index} value={col.name}>{col.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="auto-calculate">
+                <button className="btn-calculate">
+                  🔍 Auto-Calculate DI for All Protected Attributes
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="section-divider">
+          <span>OR</span>
+        </div>
+
+        {/* Section B: Manual Input */}
+        <div className="form-section">
+          <h2>Section B: Manual Input</h2>
+
+          {/* Gender (Fixed) */}
+          <div className="manual-subsection">
+            <h3>Gender</h3>
+            <div className="gender-inputs">
+              <div className="input-row">
+                <span className="row-label">Male:</span>
+                <input
+                  type="number"
+                  placeholder="Total applicants"
+                  value={genderData.male.total}
+                  onChange={(e) => setGenderData({
+                    ...genderData,
+                    male: { ...genderData.male, total: e.target.value }
+                  })}
+                  className="input-field"
+                />
+                <input
+                  type="number"
+                  placeholder="Approved"
+                  value={genderData.male.approved}
+                  onChange={(e) => setGenderData({
+                    ...genderData,
+                    male: { ...genderData.male, approved: e.target.value }
+                  })}
+                  className="input-field"
+                />
+                <span className="rate-display">
+                  → {calculateRate(genderData.male.approved, genderData.male.total)}%
+                </span>
+              </div>
+
+              <div className="input-row">
+                <span className="row-label">Female:</span>
+                <input
+                  type="number"
+                  placeholder="Total applicants"
+                  value={genderData.female.total}
+                  onChange={(e) => setGenderData({
+                    ...genderData,
+                    female: { ...genderData.female, total: e.target.value }
+                  })}
+                  className="input-field"
+                />
+                <input
+                  type="number"
+                  placeholder="Approved"
+                  value={genderData.female.approved}
+                  onChange={(e) => setGenderData({
+                    ...genderData,
+                    female: { ...genderData.female, approved: e.target.value }
+                  })}
+                  className="input-field"
+                />
+                <span className="rate-display">
+                  → {calculateRate(genderData.female.approved, genderData.female.total)}%
+                </span>
+              </div>
+
+              {di && (
+                <div className={`di-result ${diStatus.class}`}>
+                  <strong>DI = {di}</strong>
+                  <span className="di-status">{diStatus.icon} {diStatus.label}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Ethnic Group (Flexible) */}
+          <div className="manual-subsection">
+            <h3>Ethnic Group</h3>
+            {ethnicGroups.map((group, index) => (
+              <div key={index} className="input-row">
+                <input
+                  type="text"
+                  placeholder="Group name"
+                  value={group.name}
+                  onChange={(e) => updateEthnicGroup(index, 'name', e.target.value)}
+                  className="input-field input-name"
+                />
+                <input
+                  type="number"
+                  placeholder="Total"
+                  value={group.total}
+                  onChange={(e) => updateEthnicGroup(index, 'total', e.target.value)}
+                  className="input-field"
+                />
+                <input
+                  type="number"
+                  placeholder="Approved"
+                  value={group.approved}
+                  onChange={(e) => updateEthnicGroup(index, 'approved', e.target.value)}
+                  className="input-field"
+                />
+                <span className="rate-display">
+                  → {calculateRate(group.approved, group.total)}%
+                </span>
+                {ethnicGroups.length > 1 && (
+                  <button
+                    onClick={() => removeEthnicGroup(index)}
+                    className="btn-delete"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+            <button onClick={addEthnicGroup} className="btn-add-row">
+              + Add Group
+            </button>
+          </div>
+
+          {/* Zip Code (Flexible) */}
+          <div className="manual-subsection">
+            <h3>Zip Code</h3>
+            {zipCodes.map((zip, index) => (
+              <div key={index} className="input-row">
+                <input
+                  type="text"
+                  placeholder="Zip code or area"
+                  value={zip.name}
+                  onChange={(e) => updateZipCode(index, 'name', e.target.value)}
+                  className="input-field input-name"
+                />
+                <input
+                  type="number"
+                  placeholder="Total"
+                  value={zip.total}
+                  onChange={(e) => updateZipCode(index, 'total', e.target.value)}
+                  className="input-field"
+                />
+                <input
+                  type="number"
+                  placeholder="Approved"
+                  value={zip.approved}
+                  onChange={(e) => updateZipCode(index, 'approved', e.target.value)}
+                  className="input-field"
+                />
+                <span className="rate-display">
+                  → {calculateRate(zip.approved, zip.total)}%
+                </span>
+                {zipCodes.length > 1 && (
+                  <button
+                    onClick={() => removeZipCode(index)}
+                    className="btn-delete"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+            <button onClick={addZipCode} className="btn-add-row">
+              + Add Area
+            </button>
+          </div>
+        </div>
+
+        <div className="form-actions">
+          <button onClick={handleGenerateReport} className="btn-generate-report">
+            📄 Generate Audit Report (PDF)
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
