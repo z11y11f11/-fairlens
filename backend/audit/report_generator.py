@@ -65,7 +65,7 @@ class AuditReportGenerator:
         # Executive Summary
         report.append("## Executive Summary\n")
         overall_risk = composite_risk.get('risk_level', 'UNKNOWN')
-        composite_score = composite_risk.get('composite_score', 0)
+        composite_score = round(composite_risk.get('composite_score', 0), 2)
         
         report.append(
             f"This audit assessed an AI-powered loan approval system for bias, discrimination, "
@@ -101,49 +101,8 @@ class AuditReportGenerator:
         report.append("- **Federal Reserve SR 11-7**: Model risk management guidance")
         report.append("\n")
         
-        # Section 1: Data Bias Risk Assessment
-        report.append("## 1. Data Bias Risk Assessment\n")
-        
-        # Protected attributes check
-        if protected_check.get('violation_count', 0) > 0:
-            report.append(f"### 🔴 CRITICAL: Protected Attributes Detected\n")
-            for violation in protected_check.get('violations', []):
-                report.append(f"- **{violation['feature']}** (maps to {violation['protected_attribute']})")
-            report.append("\n**Legal Implications:**")
-            for implication in protected_check.get('legal_implications', []):
-                report.append(f"- {implication}")
-            report.append("\n")
-        else:
-            report.append(f"### {protected_check.get('risk_level', '🟢 COMPLIANT')}\n")
-            report.append("No direct use of protected attributes detected in model features.\n")
-        
-        # Proxy variables
-        proxy_count = proxy_analysis.get('count', 0)
-        if proxy_count > 0:
-            risk_icon = "🔴" if proxy_count >= 3 else "🟡"
-            report.append(f"### {risk_icon} Proxy Variables Detected: {proxy_count}\n")
-            report.append("The following proxy variables may indirectly encode protected characteristics:\n")
-            for proxy in proxy_analysis.get('detected_proxies', []):
-                explanation = proxy_analysis.get('explanations', {}).get(proxy, '')
-                report.append(f"- **{proxy}**: {explanation}")
-            report.append("\n")
-        else:
-            report.append("### 🟢 No Proxy Variables Detected\n")
-            report.append("No obvious proxy variables found in the feature set.\n")
-        
-        # Template findings - Data Bias
-        data_bias_findings = template_findings.get('findings', {}).get('data_bias', [])
-        if data_bias_findings:
-            report.append("### Additional Data Quality Findings\n")
-            for finding in data_bias_findings:
-                icon = self._get_risk_icon(finding.get('risk_level', ''))
-                report.append(f"**{icon} {finding.get('category', 'Finding')}**")
-                report.append(f"- {finding.get('finding', '')}")
-                report.append(f"- *{finding.get('explanation', '')}*")
-                report.append(f"- Regulation: {finding.get('regulation', 'N/A')}\n")
-        
-        # Section 2: Discrimination Detection Results
-        report.append("## 2. Discrimination Detection Results\n")
+        # Section 1: Discrimination Detection Results (removed Data Bias Risk Assessment section)
+        report.append("## 1. Discrimination Detection Results\n")
         
         di_ratio = di_analysis.get('disparate_impact')
         if di_ratio is not None:
@@ -155,9 +114,9 @@ class AuditReportGenerator:
                 icon = "🟢"
             
             report.append(f"### {icon} Disparate Impact Analysis\n")
-            report.append(f"**Disparate Impact Ratio:** {di_ratio:.3f}")
-            report.append(f"**Statistical Parity Difference:** {di_analysis.get('statistical_parity_difference', 0):.3f}")
-            report.append(f"**Equal Opportunity Difference:** {di_analysis.get('equal_opportunity_difference', 0):.3f}\n")
+            report.append(f"**Disparate Impact Ratio:** {round(di_ratio, 2)}")
+            report.append(f"**Statistical Parity Difference:** {round(di_analysis.get('statistical_parity_difference', 0), 2)}")
+            report.append(f"**Equal Opportunity Difference:** {round(di_analysis.get('equal_opportunity_difference', 0), 2)}\n")
             
             report.append("**Interpretation:**")
             report.append(f"{di_analysis.get('interpretation', 'No interpretation available')}\n")
@@ -166,11 +125,43 @@ class AuditReportGenerator:
             metrics = di_analysis.get('metrics_detail', {})
             if metrics:
                 report.append("**Detailed Metrics:**")
-                report.append(f"- Privileged group selection rate: {metrics.get('privileged_selection_rate', 0):.1%}")
-                report.append(f"- Unprivileged group selection rate: {metrics.get('unprivileged_selection_rate', 0):.1%}")
+                priv_rate = metrics.get('privileged_selection_rate', 0)
+                unpriv_rate = metrics.get('unprivileged_selection_rate', 0)
+                report.append(f"- Privileged group selection rate: {round(priv_rate * 100, 2)}%")
+                report.append(f"- Unprivileged group selection rate: {round(unpriv_rate * 100, 2)}%")
                 report.append(f"- Total samples analyzed: {metrics.get('total_samples', 0):,}")
                 report.append(f"- Privileged samples: {metrics.get('privileged_samples', 0):,}")
                 report.append(f"- Unprivileged samples: {metrics.get('unprivileged_samples', 0):,}\n")
+        
+        # Multi-group DI analysis (for CSV uploads with multiple groups)
+        protected_attrs = di_analysis.get('protected_attributes', {})
+        if protected_attrs:
+            for attr_name, attr_data in protected_attrs.items():
+                di_ratio_attr = attr_data.get('di_ratio', 0)
+                if di_ratio_attr < 0.8:
+                    icon = "🔴"
+                elif di_ratio_attr < 1.0:
+                    icon = "🟡"
+                else:
+                    icon = "🟢"
+                
+                report.append(f"### {icon} {attr_name.title()} DI Analysis\n")
+                report.append(f"**Disparate Impact Ratio:** {round(di_ratio_attr, 2)}\n")
+                
+                # Show all group rates sorted by rate (highest to lowest)
+                group_stats = attr_data.get('group_stats', {})
+                if group_stats:
+                    sorted_groups = sorted(group_stats.items(), key=lambda x: x[1]['rate'], reverse=True)
+                    report.append("**Group Approval Rates:**")
+                    for i, (group_name, stats) in enumerate(sorted_groups):
+                        rate_pct = round(stats['rate'] * 100, 2)
+                        if i == 0:
+                            report.append(f"- {group_name}: {rate_pct}% (reference/highest)")
+                        elif i == len(sorted_groups) - 1:
+                            report.append(f"- {group_name}: {rate_pct}% (lowest)")
+                        else:
+                            report.append(f"- {group_name}: {rate_pct}%")
+                    report.append(f"\n**DI = {round(di_ratio_attr, 2)} {icon}**\n")
         
         # Template discrimination findings
         discrimination_findings = template_findings.get('findings', {}).get('discrimination', [])
@@ -183,12 +174,12 @@ class AuditReportGenerator:
                 report.append(f"- *{finding.get('explanation', '')}*")
                 report.append(f"- Regulation: {finding.get('regulation', 'N/A')}\n")
         
-        # Section 3: Accountability & Governance
-        report.append("## 3. Accountability & Governance\n")
+        # Section 2: Accountability & Governance (renumbered from 3)
+        report.append("## 2. Accountability & Governance\n")
         
         maturity = accountability_report.get('governance_maturity', {})
         report.append(f"**Governance Maturity Level:** {maturity.get('level_name', 'Unknown')} (Level {maturity.get('maturity_level', 0)})")
-        report.append(f"**Maturity Score:** {maturity.get('score', 0)}/100")
+        report.append(f"**Maturity Score:** {round(maturity.get('score', 0), 2)}/100")
         report.append(f"**Risk Level:** {self._get_risk_icon(maturity.get('risk', ''))} {maturity.get('risk', 'UNKNOWN')}\n")
         
         # RACI Matrix
@@ -224,8 +215,8 @@ class AuditReportGenerator:
                 report.append(f"- {finding.get('finding', '')}")
                 report.append(f"- *{finding.get('explanation', '')}*\n")
         
-        # Section 4: Data Privacy Compliance
-        report.append("## 4. Data Privacy Compliance\n")
+        # Section 3: Data Privacy Compliance (renumbered from 4)
+        report.append("## 3. Data Privacy Compliance\n")
         
         privacy_findings = template_findings.get('findings', {}).get('privacy', [])
         if privacy_findings:
@@ -237,8 +228,8 @@ class AuditReportGenerator:
                 report.append(f"- *{finding.get('explanation', '')}*")
                 report.append(f"- Regulation: {finding.get('regulation', 'N/A')}\n")
         
-        # Section 5: Remediation Recommendations
-        report.append("## 5. Remediation Recommendations\n")
+        # Section 4: Remediation Recommendations (renumbered from 5)
+        report.append("## 4. Remediation Recommendations\n")
         
         recommendations = template_findings.get('recommendations', [])
         if recommendations:
@@ -276,7 +267,7 @@ class AuditReportGenerator:
         report.append(f"**Submitted By:** {submitter}")
         report.append(f"**Model Version:** {accountability_report['audit_trail'].get('model_version', 'N/A')}")
         report.append(f"**Next Review Date:** {template_findings.get('next_review_date', 'TBD')}")
-        report.append(f"\n**Composite Risk Score:** {composite_score}/100")
+        report.append(f"\n**Composite Risk Score:** {round(composite_score, 2)}/100")
         report.append(f"**Overall Risk Level:** {overall_risk}")
         
         report.append("\n---")

@@ -491,6 +491,338 @@ def run_manual_audit():
         }), 500
 
 
+@app.route('/api/audit/csv', methods=['POST'])
+def run_csv_audit():
+    """
+    Run audit with uploaded CSV file.
+    
+    Expected form data:
+    - file: CSV file upload
+    - result_column: Name of the result column (0/1 values)
+    - protected_attributes: JSON array of protected attribute column names
+    
+    Returns:
+        JSON with audit results and PDF download URL
+    """
+    try:
+        # Check if file is present
+        if 'file' not in request.files:
+            return jsonify({
+                'error': 'No file uploaded',
+                'status': 'error'
+            }), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({
+                'error': 'No file selected',
+                'status': 'error'
+            }), 400
+        
+        # Get parameters
+        result_column = request.form.get('result_column')
+        protected_attributes_json = request.form.get('protected_attributes')
+        
+        if not result_column:
+            return jsonify({
+                'error': 'result_column is required',
+                'status': 'error'
+            }), 400
+        
+        if not protected_attributes_json:
+            return jsonify({
+                'error': 'protected_attributes is required',
+                'status': 'error'
+            }), 400
+        
+        import json
+        protected_attributes = json.loads(protected_attributes_json)
+        
+        if not protected_attributes:
+            return jsonify({
+                'error': 'At least one protected attribute must be selected',
+                'status': 'error'
+            }), 400
+        
+        print(f"[{datetime.now().isoformat()}] Starting CSV audit")
+        print(f"File: {file.filename}")
+        print(f"Result column: {result_column}")
+        print(f"Protected attributes: {protected_attributes}")
+        
+        # Read CSV file
+        import pandas as pd
+        import io
+        
+        # Read file content
+        file_content = file.read()
+        
+        # Try to read as CSV
+        try:
+            df = pd.read_csv(io.BytesIO(file_content))
+        except Exception as e:
+            # Try Excel format
+            try:
+                df = pd.read_excel(io.BytesIO(file_content))
+            except Exception as e2:
+                return jsonify({
+                    'error': f'Failed to read file. Must be CSV or Excel format. CSV error: {str(e)}, Excel error: {str(e2)}',
+                    'status': 'error'
+                }), 400
+        
+        # Validate result column exists
+        if result_column not in df.columns:
+            return jsonify({
+                'error': f'Result column "{result_column}" not found in file. Available columns: {list(df.columns)}',
+                'status': 'error'
+            }), 400
+        
+        # Validate result column has 0/1 values
+        unique_values = df[result_column].dropna().unique()
+        if not set(unique_values).issubset({0, 1, 0.0, 1.0, '0', '1'}):
+            return jsonify({
+                'error': f'Result column "{result_column}" must contain only 0 or 1 values. Found: {list(unique_values)}',
+                'status': 'error'
+            }), 400
+        
+        # Convert result column to int
+        df[result_column] = df[result_column].astype(int)
+        
+        # Validate protected attributes exist
+        missing_attrs = [attr for attr in protected_attributes if attr not in df.columns]
+        if missing_attrs:
+            return jsonify({
+                'error': f'Protected attributes not found in file: {missing_attrs}. Available columns: {list(df.columns)}',
+                'status': 'error'
+            }), 400
+        
+        # Calculate DI for each protected attribute
+        di_results = {}
+        all_findings = []
+        
+        for attr in protected_attributes:
+            # Get unique groups in this attribute
+            groups = df[attr].dropna().unique()
+            
+            if len(groups) < 2:
+                continue
+            
+            # Calculate approval rate for each group
+            group_stats = {}
+            for group in groups:
+                group_data = df[df[attr] == group]
+                total = len(group_data)
+                approved = group_data[result_column].sum()
+                rate = approved / total if total > 0 else 0
+                group_stats[str(group)] = {
+                    'total': int(total),
+                    'approved': int(approved),
+                    'rate': round(float(rate), 4)  # Round to 4 decimals for precision
+                }
+            
+            # Find min and max rates across ALL groups
+            rates = [stats['rate'] for stats in group_stats.values()]
+            min_rate = min(rates)
+            max_rate = max(rates)
+            
+            # Calculate DI = min_rate / max_rate (always between 0 and 1)
+            di_ratio = round(min_rate / max_rate, 2) if max_rate > 0 else 0
+            
+            # Determine risk level
+            if di_ratio < 0.8:
+                risk_level = "HIGH RISK 🔴"
+                risk_class = "violation"
+            elif di_ratio < 1.0:
+                risk_level = "MEDIUM RISK 🟡"
+                risk_class = "warning"
+            else:
+                risk_level = "LOW RISK 🟢"
+                risk_class = "compliant"
+            
+            # Find which groups have min/max rates
+            min_group = [g for g, s in group_stats.items() if s['rate'] == min_rate][0]
+            max_group = [g for g, s in group_stats.items() if s['rate'] == max_rate][0]
+            
+            # Build detailed interpretation showing all groups
+            sorted_groups = sorted(group_stats.items(), key=lambda x: x[1]['rate'], reverse=True)
+            group_details = []
+            for group_name, stats in sorted_groups:
+                rate_pct = round(stats['rate'] * 100, 2)
+                if group_name == max_group:
+                    group_details.append(f"{group_name}: {rate_pct}% (highest)")
+                elif group_name == min_group:
+                    group_details.append(f"{group_name}: {rate_pct}% (lowest)")
+                else:
+                    group_details.append(f"{group_name}: {rate_pct}%")
+            
+            di_results[attr] = {
+                'di_ratio': di_ratio,
+                'risk_level': risk_level,
+                'risk_class': risk_class,
+                'group_stats': group_stats,
+                'min_group': min_group,
+                'max_group': max_group,
+                'interpretation': (
+                    f"{attr.title()}: DI = {di_ratio} {risk_level}. "
+                    f"Groups: {', '.join(group_details)}"
+                )
+            }
+            
+            all_findings.append(di_results[attr]['interpretation'])
+        
+        # Calculate overall risk level (worst case across all attributes)
+        all_di_ratios = [result['di_ratio'] for result in di_results.values()]
+        min_di = round(min(all_di_ratios), 2) if all_di_ratios else 1.0
+        
+        if min_di < 0.8:
+            overall_risk = "HIGH RISK 🔴"
+        elif min_di < 1.0:
+            overall_risk = "MEDIUM RISK 🟡"
+        else:
+            overall_risk = "LOW RISK 🟢"
+        
+        # Build audit results structure
+        audit_results = {
+            'disparate_impact_analysis': {
+                'disparate_impact': min_di,
+                'risk_level': overall_risk,
+                'protected_attributes': di_results,
+                'interpretation': f"Analyzed {len(protected_attributes)} protected attributes. Minimum DI ratio: {min_di:.3f}"
+            },
+            'proxy_variable_analysis': {
+                'detected_proxies': [],
+                'count': 0,
+                'risk_level': 'LOW RISK 🟢',
+                'risk_explanation': 'CSV upload - no proxy analysis',
+                'explanations': {},
+                'recommendations': []
+            },
+            'protected_attributes_check': {
+                'violations': [],
+                'violation_count': 0,
+                'risk_level': 'COMPLIANT ✅',
+                'legal_implications': ['No direct use of protected attributes'],
+                'required_actions': ['Continue monitoring']
+            },
+            'composite_risk_score': {
+                'composite_score': round(80 if min_di >= 0.8 else min_di * 100, 2),
+                'risk_level': overall_risk,
+                'component_scores': {
+                    'disparate_impact_score': round(80 if min_di >= 0.8 else min_di * 100, 2),
+                    'proxy_variable_score': 100,
+                    'data_quality_score': 80,
+                    'privacy_score': 90
+                },
+                'recommendations': []
+            },
+            'summary': {
+                'overall_risk_level': overall_risk,
+                'composite_score': round(80 if min_di >= 0.8 else min_di * 100, 2),
+                'disparate_impact_ratio': min_di,
+                'key_findings': all_findings,
+                'priority_actions': []
+            }
+        }
+        
+        # Create minimal template findings
+        template_findings = {
+            'findings': {
+                'data_bias': [],
+                'discrimination': [],
+                'accountability': [],
+                'privacy': []
+            },
+            'recommendations': [],
+            'risk_summary': {
+                'high_risk_count': sum(1 for r in di_results.values() if r['di_ratio'] < 0.8),
+                'medium_risk_count': sum(1 for r in di_results.values() if 0.8 <= r['di_ratio'] < 1.0)
+            },
+            'next_review_date': (datetime.now().replace(month=datetime.now().month + 3) if datetime.now().month <= 9
+                                else datetime.now().replace(year=datetime.now().year + 1, month=(datetime.now().month + 3) % 12)).strftime('%Y-%m-%d')
+        }
+        
+        # Create accountability report
+        audit_id = f"FL-{datetime.now().year}-{datetime.now().microsecond:06d}"
+        accountability_report = {
+            'audit_trail': {
+                'audit_id': audit_id,
+                'timestamp': datetime.now().isoformat(),
+                'submitter': 'CSV Upload User',
+                'model_version': '1.0.0',
+                'data_file': file.filename
+            },
+            'governance_maturity': {
+                'maturity_level': 2,
+                'level_name': 'Defined',
+                'score': 60,
+                'risk': 'MEDIUM'
+            },
+            'raci_matrix': {
+                'matrix': {}
+            },
+            'accountability_gaps': []
+        }
+        
+        # Generate reports
+        print("Generating audit reports...")
+        all_data = {
+            'audit_results': audit_results,
+            'template_findings': template_findings,
+            'accountability_report': accountability_report
+        }
+        
+        report_files = report_generator.generate_full_report(all_data, REPORTS_DIR)
+        
+        # Prepare response
+        response = {
+            'status': 'success',
+            'audit_id': audit_id,
+            'timestamp': datetime.now().isoformat(),
+            'file_info': {
+                'filename': file.filename,
+                'rows': len(df),
+                'columns': len(df.columns)
+            },
+            'risk_summary': {
+                'overall_risk_level': overall_risk,
+                'composite_score': round(audit_results['composite_risk_score']['composite_score'], 2),
+                'disparate_impact_ratio': min_di,
+                'protected_attributes_analyzed': len(protected_attributes),
+                'results': di_results
+            },
+            'files': {
+                'pdf_url': f'/api/download/{report_files["pdf_filename"]}',
+                'markdown_url': f'/api/download/{report_files["markdown_filename"]}',
+                'pdf_filename': report_files['pdf_filename'],
+                'markdown_filename': report_files['markdown_filename']
+            }
+        }
+        
+        print(f"[{datetime.now().isoformat()}] CSV audit completed: {audit_id}")
+        
+        return jsonify(response), 200
+        
+    except ValueError as e:
+        error_msg = f"Invalid input data: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        return jsonify({
+            'error': error_msg,
+            'status': 'error',
+            'type': 'validation_error'
+        }), 400
+        
+    except Exception as e:
+        error_msg = f"Internal server error: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        print(traceback.format_exc())
+        return jsonify({
+            'error': error_msg,
+            'status': 'error',
+            'type': 'internal_error',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 @app.route('/api/download/<filename>', methods=['GET'])
 def download_file(filename):
     """

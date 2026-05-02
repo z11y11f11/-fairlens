@@ -1,14 +1,22 @@
 import React, { useState } from 'react';
+import Overview from './Overview';
 import AlertCenter from './AlertCenter';
 import Dashboard from './Dashboard';
 import AuditForm from './AuditForm';
 import Regulations from './Regulations';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('alert');
+  const [currentPage, setCurrentPage] = useState('overview');
+
+  const handleNavigate = (pageIndex) => {
+    const pages = ['overview', 'alert', 'dashboard', 'audit', 'regulations'];
+    setCurrentPage(pages[pageIndex]);
+  };
 
   const renderPage = () => {
     switch (currentPage) {
+      case 'overview':
+        return <Overview onNavigate={handleNavigate} />;
       case 'alert':
         return <AlertCenter />;
       case 'dashboard':
@@ -18,7 +26,7 @@ function App() {
       case 'regulations':
         return <Regulations />;
       default:
-        return <AlertCenter />;
+        return <Overview onNavigate={handleNavigate} />;
     }
   };
 
@@ -32,6 +40,13 @@ function App() {
       </header>
 
       <nav className="app-nav">
+        <button
+          className={`nav-tab ${currentPage === 'overview' ? 'active' : ''}`}
+          onClick={() => setCurrentPage('overview')}
+        >
+          <span className="nav-icon">🏠</span>
+          <span className="nav-label">Overview</span>
+        </button>
         <button
           className={`nav-tab ${currentPage === 'alert' ? 'active' : ''}`}
           onClick={() => setCurrentPage('alert')}

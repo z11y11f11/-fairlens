@@ -1,10 +1,15 @@
 import React, { useState } from 'react';
 
+/* global XLSX */
+
 const AuditForm = () => {
-  const [uploadMethod, setUploadMethod] = useState('csv'); // 'csv' or 'manual'
+  // CSV upload state
   const [csvFile, setCsvFile] = useState(null);
   const [csvColumns, setCsvColumns] = useState([]);
+  const [csvData, setCsvData] = useState(null);
   const [resultColumn, setResultColumn] = useState('');
+  const [selectedProtectedAttrs, setSelectedProtectedAttrs] = useState([]);
+  const [csvPreview, setCsvPreview] = useState([]);
   
   // Manual input state
   const [genderData, setGenderData] = useState({
@@ -75,20 +80,286 @@ const AuditForm = () => {
     return { icon: '🔴', label: 'VIOLATION', class: 'status-violation' };
   };
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setCsvFile(file);
-      // Simulate column detection
-      const mockColumns = [
-        { name: 'age', type: 'normal', icon: '✅' },
-        { name: 'gender', type: 'protected', icon: '🔴' },
-        { name: 'income', type: 'normal', icon: '✅' },
-        { name: 'zip_code', type: 'proxy', icon: '🟡' },
-        { name: 'loan_approved', type: 'result', icon: '🎯' }
-      ];
-      setCsvColumns(mockColumns);
-      setResultColumn('loan_approved');
+    if (!file) return;
+    
+    setCsvFile(file);
+    
+    // Detect file type
+    const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+    
+    const reader = new FileReader();
+    
+    if (isExcel) {
+      // Parse Excel file using SheetJS
+      reader.onload = async (event) => {
+        try {
+          const data = new Uint8Array(event.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          
+          // Get first sheet
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          
+          // Convert to JSON (array of arrays)
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          
+          if (jsonData.length < 2) {
+            alert('Excel file must have at least a header row and one data row');
+            return;
+          }
+          
+          // First row is headers
+          const headers = jsonData[0].map(h => String(h).trim());
+          
+          // Parse first 5 data rows for preview
+          const previewRows = [];
+          for (let i = 1; i < Math.min(6, jsonData.length); i++) {
+            const row = {};
+            headers.forEach((header, idx) => {
+              row[header] = jsonData[i][idx] !== undefined ? String(jsonData[i][idx]) : '';
+            });
+            previewRows.push(row);
+          }
+          
+          setCsvPreview(previewRows);
+          
+          // Detect column types (same logic as CSV)
+          const detectedColumns = headers.map(colName => {
+            const lowerName = colName.toLowerCase();
+            
+            // Check if it's a result column (0/1 values)
+            const isResult = previewRows.every(row => {
+              const val = row[colName];
+              return val === '0' || val === '1' || val === 0 || val === 1 || val === '';
+            });
+            
+            // Detect protected attributes
+            if (lowerName.includes('gender') || lowerName.includes('sex')) {
+              return { name: colName, type: 'protected', icon: '🔴', label: 'Protected Attribute' };
+            } else if (lowerName.includes('race') || lowerName.includes('ethnicity') || lowerName.includes('ethnic')) {
+              return { name: colName, type: 'protected', icon: '🔴', label: 'Protected Attribute' };
+            } else if (lowerName.includes('age')) {
+              return { name: colName, type: 'protected', icon: '🔴', label: 'Protected Attribute' };
+            } else if (lowerName.includes('zip') || lowerName.includes('postal') || lowerName.includes('zipcode')) {
+              return { name: colName, type: 'proxy', icon: '🟡', label: 'Proxy Variable' };
+            } else if (isResult && (lowerName.includes('approved') || lowerName.includes('outcome') || lowerName.includes('result'))) {
+              return { name: colName, type: 'result', icon: '🎯', label: 'Result Column' };
+            } else {
+              return { name: colName, type: 'normal', icon: '✅', label: 'Normal Feature' };
+            }
+          });
+          
+          setCsvColumns(detectedColumns);
+          
+          // Auto-select result column
+          const resultCols = detectedColumns.filter(col => col.type === 'result');
+          if (resultCols.length > 0) {
+            setResultColumn(resultCols[0].name);
+          } else {
+            // If no result column detected, select first column with 0/1 values
+            const binaryCol = detectedColumns.find(col => {
+              return previewRows.every(row => {
+                const val = row[col.name];
+                return val === '0' || val === '1' || val === 0 || val === 1 || val === '';
+              });
+            });
+            if (binaryCol) {
+              setResultColumn(binaryCol.name);
+            }
+          }
+          
+          // Auto-select protected attributes
+          const protectedCols = detectedColumns
+            .filter(col => col.type === 'protected')
+            .map(col => col.name);
+          setSelectedProtectedAttrs(protectedCols);
+          
+        } catch (error) {
+          console.error('Error parsing Excel file:', error);
+          alert('Error parsing Excel file. Please ensure it is a valid .xlsx or .xls file.');
+        }
+      };
+      
+      reader.readAsArrayBuffer(file);
+      
+    } else {
+      // Parse CSV file (original logic)
+      reader.onload = async (event) => {
+        const text = event.target.result;
+        const lines = text.split('\n').filter(line => line.trim());
+        
+        if (lines.length < 2) {
+          alert('CSV file must have at least a header row and one data row');
+          return;
+        }
+        
+        // Parse header
+        const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+        
+        // Parse first 5 data rows for preview
+        const previewRows = [];
+        for (let i = 1; i < Math.min(6, lines.length); i++) {
+          const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+          const row = {};
+          headers.forEach((header, idx) => {
+            row[header] = values[idx] || '';
+          });
+          previewRows.push(row);
+        }
+        
+        setCsvPreview(previewRows);
+      
+      // Detect column types
+      const detectedColumns = headers.map(colName => {
+        const lowerName = colName.toLowerCase();
+        
+        // Check if it's a result column (0/1 values)
+        const isResult = previewRows.every(row => {
+          const val = row[colName];
+          return val === '0' || val === '1' || val === 0 || val === 1 || val === '';
+        });
+        
+        // Detect protected attributes
+        if (lowerName.includes('gender') || lowerName.includes('sex')) {
+          return { name: colName, type: 'protected', icon: '🔴', label: 'Protected Attribute' };
+        } else if (lowerName.includes('race') || lowerName.includes('ethnicity') || lowerName.includes('ethnic')) {
+          return { name: colName, type: 'protected', icon: '🔴', label: 'Protected Attribute' };
+        } else if (lowerName.includes('age')) {
+          return { name: colName, type: 'protected', icon: '🔴', label: 'Protected Attribute' };
+        } else if (lowerName.includes('zip') || lowerName.includes('postal') || lowerName.includes('zipcode')) {
+          return { name: colName, type: 'proxy', icon: '🟡', label: 'Proxy Variable' };
+        } else if (isResult && (lowerName.includes('approved') || lowerName.includes('outcome') || lowerName.includes('result'))) {
+          return { name: colName, type: 'result', icon: '🎯', label: 'Result Column' };
+        } else {
+          return { name: colName, type: 'normal', icon: '✅', label: 'Normal Feature' };
+        }
+      });
+      
+      setCsvColumns(detectedColumns);
+      
+      // Auto-select result column
+      const resultCols = detectedColumns.filter(col => col.type === 'result');
+      if (resultCols.length > 0) {
+        setResultColumn(resultCols[0].name);
+      } else {
+        // If no result column detected, select first column with 0/1 values
+        const binaryCol = detectedColumns.find(col => {
+          return previewRows.every(row => {
+            const val = row[col.name];
+            return val === '0' || val === '1' || val === 0 || val === 1 || val === '';
+          });
+        });
+        if (binaryCol) {
+          setResultColumn(binaryCol.name);
+        }
+      }
+      
+      // Auto-select protected attributes
+      const protectedCols = detectedColumns
+        .filter(col => col.type === 'protected')
+        .map(col => col.name);
+      setSelectedProtectedAttrs(protectedCols);
+      };
+      
+      reader.readAsText(file);
+    }
+  };
+
+  const toggleProtectedAttr = (attrName) => {
+    if (selectedProtectedAttrs.includes(attrName)) {
+      setSelectedProtectedAttrs(selectedProtectedAttrs.filter(a => a !== attrName));
+    } else {
+      setSelectedProtectedAttrs([...selectedProtectedAttrs, attrName]);
+    }
+  };
+
+  const handleCsvGenerateReport = async () => {
+    if (!csvFile) {
+      alert('Please upload a CSV file first');
+      return;
+    }
+    
+    if (!resultColumn) {
+      alert('Please select a result column');
+      return;
+    }
+    
+    if (selectedProtectedAttrs.length === 0) {
+      alert('Please select at least one protected attribute to analyze');
+      return;
+    }
+    
+    try {
+      // Show loading state
+      const button = document.querySelector('.btn-csv-generate');
+      const originalText = button.textContent;
+      button.textContent = '⏳ Analyzing CSV data...';
+      button.disabled = true;
+      
+      // Prepare form data
+      const formData = new FormData();
+      formData.append('file', csvFile);
+      formData.append('result_column', resultColumn);
+      formData.append('protected_attributes', JSON.stringify(selectedProtectedAttrs));
+      
+      // Send POST request to backend
+      const response = await fetch('http://localhost:5001/api/audit/csv', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok && result.status === 'success') {
+        // Success - trigger PDF download
+        const pdfUrl = `http://localhost:5001${result.files.pdf_url}`;
+        
+        // Create temporary link and trigger download
+        const link = document.createElement('a');
+        link.href = pdfUrl;
+        link.download = result.files.pdf_filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Build results summary
+        let resultsSummary = `✅ CSV Audit Report Generated!\n\n`;
+        resultsSummary += `Audit ID: ${result.audit_id}\n`;
+        resultsSummary += `File: ${result.file_info.filename} (${result.file_info.rows} rows)\n`;
+        resultsSummary += `Overall Risk: ${result.risk_summary.overall_risk_level}\n`;
+        resultsSummary += `DI Ratio: ${result.risk_summary.disparate_impact_ratio.toFixed(3)}\n\n`;
+        resultsSummary += `Protected Attributes Analyzed:\n`;
+        
+        for (const [attr, data] of Object.entries(result.risk_summary.results)) {
+          resultsSummary += `\n${attr}: ${data.risk_level}\n`;
+          resultsSummary += `  DI = ${data.di_ratio.toFixed(3)}\n`;
+          resultsSummary += `  ${data.interpretation}\n`;
+        }
+        
+        resultsSummary += `\nPDF downloaded: ${result.files.pdf_filename}`;
+        
+        alert(resultsSummary);
+      } else {
+        // Error from backend
+        alert(`❌ Error: ${result.error || 'Failed to generate report'}`);
+      }
+      
+      // Restore button
+      button.textContent = originalText;
+      button.disabled = false;
+      
+    } catch (error) {
+      console.error('Error generating CSV report:', error);
+      alert(`❌ Network Error: ${error.message}\n\nMake sure the backend is running on http://localhost:5001`);
+      
+      // Restore button
+      const button = document.querySelector('.btn-csv-generate');
+      if (button) {
+        button.textContent = '📄 Generate Audit Report (PDF)';
+        button.disabled = false;
+      }
     }
   };
 
@@ -245,65 +516,157 @@ const AuditForm = () => {
       </div>
 
       <div className="audit-form-content">
-        {/* Section A: Upload CSV/Excel */}
+        {/* Section A: Upload CSV/Excel - Complete Standalone Workflow */}
         <div className="form-section">
           <h2>Section A: Upload Data File</h2>
-          <div className="upload-area">
-            <input
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              onChange={handleFileUpload}
-              className="file-input"
-              id="file-upload"
-            />
-            <label htmlFor="file-upload" className="file-upload-label">
-              📁 Choose CSV or Excel File
-            </label>
-            {csvFile && <div className="file-name">Selected: {csvFile.name}</div>}
+          
+          {/* STEP 1: Upload & Column Detection */}
+          <div className="csv-step">
+            <h3>Step 1: Upload & Column Detection</h3>
+            <div className="upload-instructions">
+              <p><strong>Upload your loan data file. Required columns:</strong></p>
+              <ul>
+                <li>A result column (e.g. loan_approved): values must be 0 or 1</li>
+                <li>At least one protected attribute column:
+                  <ul>
+                    <li>gender (Male/Female), ethnicity, zip_code, race, age</li>
+                  </ul>
+                </li>
+                <li>Optional: applicant_name, income, loan_amount</li>
+              </ul>
+            </div>
+            
+            <div className="upload-area">
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                onChange={handleFileUpload}
+                className="file-input"
+                id="file-upload"
+              />
+              <label htmlFor="file-upload" className="file-upload-label">
+                📁 Choose CSV or Excel File
+              </label>
+              {csvFile && <div className="file-name">✓ Selected: {csvFile.name}</div>}
+            </div>
+
+            {csvColumns.length > 0 && (
+              <div className="csv-analysis">
+                <h4>Detected Columns:</h4>
+                <div className="columns-list">
+                  {csvColumns.map((col, index) => (
+                    <div key={index} className={`column-item column-${col.type}`}>
+                      <span className="column-icon">{col.icon}</span>
+                      <span className="column-name">{col.name}</span>
+                      <span className="column-type">{col.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
+          {/* STEP 2: Select Columns for Analysis */}
           {csvColumns.length > 0 && (
-            <div className="csv-analysis">
-              <h3>Auto-Detected Columns</h3>
-              <div className="columns-list">
-                {csvColumns.map((col, index) => (
-                  <div key={index} className={`column-item column-${col.type}`}>
-                    <span className="column-icon">{col.icon}</span>
-                    <span className="column-name">{col.name}</span>
-                    <span className="column-type">
-                      {col.type === 'protected' && 'Protected Attribute'}
-                      {col.type === 'proxy' && 'Proxy Variable'}
-                      {col.type === 'normal' && 'Normal Feature'}
-                      {col.type === 'result' && 'Result Column'}
-                    </span>
+            <div className="csv-step">
+              <h3>Step 2: Select Columns for Analysis</h3>
+              
+              <div className="column-selection">
+                <div className="selection-group">
+                  <label><strong>Select Result Column:</strong></label>
+                  <select
+                    value={resultColumn}
+                    onChange={(e) => setResultColumn(e.target.value)}
+                    className="result-select"
+                  >
+                    <option value="">-- Select Result Column --</option>
+                    {csvColumns.map((col, index) => (
+                      <option key={index} value={col.name}>
+                        {col.icon} {col.name}
+                      </option>
+                    ))}
+                  </select>
+                  <small>Only columns with 0/1 values should be selected</small>
+                </div>
+
+                <div className="selection-group">
+                  <label><strong>Select Protected Attributes to Analyze:</strong></label>
+                  <div className="checkbox-group">
+                    {csvColumns
+                      .filter(col => col.type === 'protected' || col.type === 'proxy')
+                      .map((col, index) => (
+                        <label key={index} className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={selectedProtectedAttrs.includes(col.name)}
+                            onChange={() => toggleProtectedAttr(col.name)}
+                          />
+                          <span>{col.icon} {col.name}</span>
+                        </label>
+                      ))}
                   </div>
-                ))}
+                  {selectedProtectedAttrs.length === 0 && (
+                    <small style={{color: 'orange'}}>⚠️ Please select at least one protected attribute</small>
+                  )}
+                </div>
               </div>
 
-              <div className="result-selection">
-                <label>Select Result Column:</label>
-                <select 
-                  value={resultColumn} 
-                  onChange={(e) => setResultColumn(e.target.value)}
-                  className="result-select"
-                >
-                  {csvColumns.map((col, index) => (
-                    <option key={index} value={col.name}>{col.name}</option>
-                  ))}
-                </select>
-              </div>
+              {/* Data Preview */}
+              {csvPreview.length > 0 && (
+                <div className="data-preview">
+                  <h4>Data Preview (first 5 rows):</h4>
+                  <div className="preview-table-container">
+                    <table className="preview-table">
+                      <thead>
+                        <tr>
+                          {Object.keys(csvPreview[0]).map((header, idx) => (
+                            <th key={idx}>{header}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {csvPreview.map((row, rowIdx) => (
+                          <tr key={rowIdx}>
+                            {Object.values(row).map((value, colIdx) => (
+                              <td key={colIdx}>{value}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
-              <div className="auto-calculate">
-                <button className="btn-calculate">
-                  🔍 Auto-Calculate DI for All Protected Attributes
-                </button>
-              </div>
+          {/* STEP 3: Generate Report */}
+          {csvColumns.length > 0 && (
+            <div className="csv-step">
+              <h3>Step 3: Generate Report</h3>
+              <button
+                onClick={handleCsvGenerateReport}
+                className="btn-csv-generate btn-generate-report"
+                disabled={!resultColumn || selectedProtectedAttrs.length === 0}
+                style={{
+                  opacity: (!resultColumn || selectedProtectedAttrs.length === 0) ? 0.5 : 1,
+                  cursor: (!resultColumn || selectedProtectedAttrs.length === 0) ? 'not-allowed' : 'pointer'
+                }}
+              >
+                📄 Generate Audit Report (PDF)
+              </button>
+              {(!resultColumn || selectedProtectedAttrs.length === 0) && (
+                <p style={{color: 'orange', marginTop: '10px'}}>
+                  ⚠️ Please complete Step 2 before generating report
+                </p>
+              )}
             </div>
           )}
         </div>
 
+        {/* Visual Divider */}
         <div className="section-divider">
-          <span>OR</span>
+          <span>── OR ──</span>
         </div>
 
         {/* Section B: Manual Input */}
