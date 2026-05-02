@@ -32,5 +32,64 @@ WARNING:root:No module named 'inFairness': SenSeI and SenSR will be unavailable.
 pip install 'aif360[inFairness]'
 WARNING:werkzeug: * Debugger is active!
 INFO:werkzeug: * Debugger PIN: 463-877-759
-INFO:werkzeug:127.0.0.1 - - [02/May/2026 23:41:45] "GET /api/health HTTP/1.1" 200 -
-INFO:werkzeug:127.0.0.1 - - [02/May/2026 23:41:59] "GET /api/health HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [03/May/2026 09:30:19] "POST /api/audit/manual HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [03/May/2026 09:33:52] "OPTIONS /api/audit/manual HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [03/May/2026 09:33:52] "POST /api/audit/manual HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [03/May/2026 09:33:52] "GET /api/download/audit_report_FL-2026-914953_20260503_093352.pdf HTTP/1.1" 200 -
+INFO:werkzeug: * Detected change in '/Users/Qulei/Desktop/fairlens/backend/app.py', reloading
+Warning: weasyprint not available. PDF generation will be disabled.
+============================================================
+FairLens AI Bias Audit API
+============================================================
+Reports directory: /Users/Qulei/Desktop/fairlens/backend/reports
+Starting server on http://localhost:5001
+Available endpoints:
+  GET  /api/health          - Health check
+  POST /api/audit           - Run bias audit
+  GET  /api/download/<file> - Download report
+  GET  /api/reports         - List all reports
+============================================================
+[2026-05-03T09:30:19.732555] Starting manual audit
+Generating audit reports...
+Warning: weasyprint not available. Creating placeholder PDF.
+[2026-05-03T09:30:19.733139] Manual audit completed: FL-2026-732653
+[2026-05-03T09:33:52.914796] Starting manual audit
+Generating audit reports...
+Warning: weasyprint not available. Creating placeholder PDF.
+[2026-05-03T09:33:52.915568] Manual audit completed: FL-2026-914953
+INFO:werkzeug: * Restarting with stat
+WARNING:root:No module named 'tensorflow': AdversarialDebiasing will be unavailable. To install, run:
+pip install 'aif360[AdversarialDebiasing]'
+WARNING:root:No module named 'tensorflow': AdversarialDebiasing will be unavailable. To install, run:
+pip install 'aif360[AdversarialDebiasing]'
+WARNING:root:No module named 'inFairness': SenSeI and SenSR will be unavailable. To install, run:
+pip install 'aif360[inFairness]'
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 463-877-759
+INFO:werkzeug: * Detected change in '/Users/Qulei/Desktop/fairlens/backend/audit/report_generator.py', reloading
+Warning: weasyprint not available. PDF generation will be disabled.
+============================================================
+FairLens AI Bias Audit API
+============================================================
+Reports directory: /Users/Qulei/Desktop/fairlens/backend/reports
+Starting server on http://localhost:5001
+Available endpoints:
+  GET  /api/health          - Health check
+  POST /api/audit           - Run bias audit
+  GET  /api/download/<file> - Download report
+  GET  /api/reports         - List all reports
+============================================================
+INFO:werkzeug: * Restarting with stat
+WARNING:root:No module named 'tensorflow': AdversarialDebiasing will be unavailable. To install, run:
+pip install 'aif360[AdversarialDebiasing]'
+WARNING:root:No module named 'tensorflow': AdversarialDebiasing will be unavailable. To install, run:
+pip install 'aif360[AdversarialDebiasing]'
+WARNING:root:No module named 'inFairness': SenSeI and SenSR will be unavailable. To install, run:
+pip install 'aif360[inFairness]'
+Traceback (most recent call last):
+  File "/Users/Qulei/Desktop/fairlens/backend/app.py", line 41, in <module>
+    report_generator = AuditReportGenerator()
+  File "/Users/Qulei/Desktop/fairlens/backend/audit/report_generator.py", line 26, in __init__
+    if WEASYPRINT_AVAILABLE:
+       ^^^^^^^^^^^^^^^^^^^^
+NameError: name 'WEASYPRINT_AVAILABLE' is not defined

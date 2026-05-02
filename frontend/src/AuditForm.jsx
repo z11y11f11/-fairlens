@@ -20,6 +20,24 @@ const AuditForm = () => {
     { name: '', total: '', approved: '' }
   ]);
 
+  // Validation errors state
+  const [validationErrors, setValidationErrors] = useState({
+    male: false,
+    female: false,
+    ethnicGroups: [],
+    zipCodes: []
+  });
+
+  // Validation helper
+  const validateInput = (approved, total) => {
+    const approvedNum = parseFloat(approved);
+    const totalNum = parseFloat(total);
+    if (approved && total && approvedNum > totalNum) {
+      return true; // Error: approved > total
+    }
+    return false;
+  };
+
   // Calculate rate and DI
   const calculateRate = (approved, total) => {
     if (!approved || !total || total === 0) return 0;
@@ -32,8 +50,22 @@ const AuditForm = () => {
     
     if (!maleRate || !femaleRate) return null;
     
-    const di = femaleRate / maleRate;
+    // BUG FIX: Always calculate DI = lower_rate / higher_rate (must be 0-1.0)
+    const lowerRate = Math.min(maleRate, femaleRate);
+    const higherRate = Math.max(maleRate, femaleRate);
+    
+    if (higherRate === 0) return null;
+    
+    const di = lowerRate / higherRate;
     return di.toFixed(2);
+  };
+
+  // Check if there are any validation errors
+  const hasValidationErrors = () => {
+    return validationErrors.male ||
+           validationErrors.female ||
+           validationErrors.ethnicGroups.some(e => e) ||
+           validationErrors.zipCodes.some(e => e);
   };
 
   const getDIStatus = (di) => {
@@ -72,6 +104,18 @@ const AuditForm = () => {
     const updated = [...ethnicGroups];
     updated[index][field] = value;
     setEthnicGroups(updated);
+    
+    // Validate if updating total or approved
+    if (field === 'total' || field === 'approved') {
+      const approved = field === 'approved' ? value : updated[index].approved;
+      const total = field === 'total' ? value : updated[index].total;
+      const errors = [...validationErrors.ethnicGroups];
+      errors[index] = validateInput(approved, total);
+      setValidationErrors({
+        ...validationErrors,
+        ethnicGroups: errors
+      });
+    }
   };
 
   const addZipCode = () => {
@@ -86,10 +130,108 @@ const AuditForm = () => {
     const updated = [...zipCodes];
     updated[index][field] = value;
     setZipCodes(updated);
+    
+    // Validate if updating total or approved
+    if (field === 'total' || field === 'approved') {
+      const approved = field === 'approved' ? value : updated[index].approved;
+      const total = field === 'total' ? value : updated[index].total;
+      const errors = [...validationErrors.zipCodes];
+      errors[index] = validateInput(approved, total);
+      setValidationErrors({
+        ...validationErrors,
+        zipCodes: errors
+      });
+    }
   };
 
-  const handleGenerateReport = () => {
-    alert('Generating audit report with current data...');
+  const handleGenerateReport = async () => {
+    // Validate gender data
+    if (!genderData.male.total || !genderData.male.approved ||
+        !genderData.female.total || !genderData.female.approved) {
+      alert('Please fill in all gender data fields (Male and Female totals and approved counts)');
+      return;
+    }
+
+    // Prepare payload
+    const payload = {
+      gender: {
+        male_total: parseFloat(genderData.male.total),
+        male_approved: parseFloat(genderData.male.approved),
+        female_total: parseFloat(genderData.female.total),
+        female_approved: parseFloat(genderData.female.approved)
+      },
+      ethnic_groups: ethnicGroups
+        .filter(g => g.name && g.total && g.approved)
+        .map(g => ({
+          name: g.name,
+          total: parseFloat(g.total),
+          approved: parseFloat(g.approved)
+        })),
+      zip_codes: zipCodes
+        .filter(z => z.name && z.total && z.approved)
+        .map(z => ({
+          name: z.name,
+          total: parseFloat(z.total),
+          approved: parseFloat(z.approved)
+        }))
+    };
+
+    try {
+      // Show loading state
+      const button = document.querySelector('.btn-generate-report');
+      const originalText = button.textContent;
+      button.textContent = '⏳ Generating report...';
+      button.disabled = true;
+
+      // Send POST request to backend
+      const response = await fetch('http://localhost:5001/api/audit/manual', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.status === 'success') {
+        // Success - trigger PDF download
+        const pdfUrl = `http://localhost:5001${result.files.pdf_url}`;
+        
+        // Create temporary link and trigger download
+        const link = document.createElement('a');
+        link.href = pdfUrl;
+        link.download = result.files.pdf_filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // Show success message
+        alert(
+          `✅ Audit Report Generated!\n\n` +
+          `Audit ID: ${result.audit_id}\n` +
+          `DI Ratio: ${result.risk_summary.disparate_impact_ratio.toFixed(3)}\n` +
+          `Risk Level: ${result.risk_summary.overall_risk_level}\n\n` +
+          `PDF downloaded: ${result.files.pdf_filename}`
+        );
+      } else {
+        // Error from backend
+        alert(`❌ Error: ${result.error || 'Failed to generate report'}`);
+      }
+
+      // Restore button
+      button.textContent = originalText;
+      button.disabled = false;
+
+    } catch (error) {
+      console.error('Error generating report:', error);
+      alert(`❌ Network Error: ${error.message}\n\nMake sure the backend is running on http://localhost:5001`);
+      
+      // Restore button
+      const button = document.querySelector('.btn-generate-report');
+      button.textContent = '📄 Generate Audit Report (PDF)';
+      button.disabled = false;
+    }
   };
 
   const di = calculateDI();
@@ -178,26 +320,45 @@ const AuditForm = () => {
                   type="number"
                   placeholder="Total applicants"
                   value={genderData.male.total}
-                  onChange={(e) => setGenderData({
-                    ...genderData,
-                    male: { ...genderData.male, total: e.target.value }
-                  })}
+                  onChange={(e) => {
+                    const newTotal = e.target.value;
+                    setGenderData({
+                      ...genderData,
+                      male: { ...genderData.male, total: newTotal }
+                    });
+                    setValidationErrors({
+                      ...validationErrors,
+                      male: validateInput(genderData.male.approved, newTotal)
+                    });
+                  }}
                   className="input-field"
                 />
                 <input
                   type="number"
                   placeholder="Approved"
                   value={genderData.male.approved}
-                  onChange={(e) => setGenderData({
-                    ...genderData,
-                    male: { ...genderData.male, approved: e.target.value }
-                  })}
+                  onChange={(e) => {
+                    const newApproved = e.target.value;
+                    setGenderData({
+                      ...genderData,
+                      male: { ...genderData.male, approved: newApproved }
+                    });
+                    setValidationErrors({
+                      ...validationErrors,
+                      male: validateInput(newApproved, genderData.male.total)
+                    });
+                  }}
                   className="input-field"
                 />
                 <span className="rate-display">
                   → {calculateRate(genderData.male.approved, genderData.male.total)}%
                 </span>
               </div>
+              {validationErrors.male && (
+                <div style={{ color: 'red', fontSize: '14px', marginLeft: '80px', marginTop: '5px' }}>
+                  Error: Approved count cannot exceed total applicants
+                </div>
+              )}
 
               <div className="input-row">
                 <span className="row-label">Female:</span>
@@ -205,26 +366,45 @@ const AuditForm = () => {
                   type="number"
                   placeholder="Total applicants"
                   value={genderData.female.total}
-                  onChange={(e) => setGenderData({
-                    ...genderData,
-                    female: { ...genderData.female, total: e.target.value }
-                  })}
+                  onChange={(e) => {
+                    const newTotal = e.target.value;
+                    setGenderData({
+                      ...genderData,
+                      female: { ...genderData.female, total: newTotal }
+                    });
+                    setValidationErrors({
+                      ...validationErrors,
+                      female: validateInput(genderData.female.approved, newTotal)
+                    });
+                  }}
                   className="input-field"
                 />
                 <input
                   type="number"
                   placeholder="Approved"
                   value={genderData.female.approved}
-                  onChange={(e) => setGenderData({
-                    ...genderData,
-                    female: { ...genderData.female, approved: e.target.value }
-                  })}
+                  onChange={(e) => {
+                    const newApproved = e.target.value;
+                    setGenderData({
+                      ...genderData,
+                      female: { ...genderData.female, approved: newApproved }
+                    });
+                    setValidationErrors({
+                      ...validationErrors,
+                      female: validateInput(newApproved, genderData.female.total)
+                    });
+                  }}
                   className="input-field"
                 />
                 <span className="rate-display">
                   → {calculateRate(genderData.female.approved, genderData.female.total)}%
                 </span>
               </div>
+              {validationErrors.female && (
+                <div style={{ color: 'red', fontSize: '14px', marginLeft: '80px', marginTop: '5px' }}>
+                  Error: Approved count cannot exceed total applicants
+                </div>
+              )}
 
               {di && (
                 <div className={`di-result ${diStatus.class}`}>
@@ -239,38 +419,45 @@ const AuditForm = () => {
           <div className="manual-subsection">
             <h3>Ethnic Group</h3>
             {ethnicGroups.map((group, index) => (
-              <div key={index} className="input-row">
-                <input
-                  type="text"
-                  placeholder="Group name"
-                  value={group.name}
-                  onChange={(e) => updateEthnicGroup(index, 'name', e.target.value)}
-                  className="input-field input-name"
-                />
-                <input
-                  type="number"
-                  placeholder="Total"
-                  value={group.total}
-                  onChange={(e) => updateEthnicGroup(index, 'total', e.target.value)}
-                  className="input-field"
-                />
-                <input
-                  type="number"
-                  placeholder="Approved"
-                  value={group.approved}
-                  onChange={(e) => updateEthnicGroup(index, 'approved', e.target.value)}
-                  className="input-field"
-                />
-                <span className="rate-display">
-                  → {calculateRate(group.approved, group.total)}%
-                </span>
-                {ethnicGroups.length > 1 && (
-                  <button
-                    onClick={() => removeEthnicGroup(index)}
-                    className="btn-delete"
-                  >
-                    ✕
-                  </button>
+              <div key={index}>
+                <div className="input-row">
+                  <input
+                    type="text"
+                    placeholder="Group name"
+                    value={group.name}
+                    onChange={(e) => updateEthnicGroup(index, 'name', e.target.value)}
+                    className="input-field input-name"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Total"
+                    value={group.total}
+                    onChange={(e) => updateEthnicGroup(index, 'total', e.target.value)}
+                    className="input-field"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Approved"
+                    value={group.approved}
+                    onChange={(e) => updateEthnicGroup(index, 'approved', e.target.value)}
+                    className="input-field"
+                  />
+                  <span className="rate-display">
+                    → {calculateRate(group.approved, group.total)}%
+                  </span>
+                  {ethnicGroups.length > 1 && (
+                    <button
+                      onClick={() => removeEthnicGroup(index)}
+                      className="btn-delete"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                {validationErrors.ethnicGroups[index] && (
+                  <div style={{ color: 'red', fontSize: '14px', marginLeft: '150px', marginTop: '5px', marginBottom: '10px' }}>
+                    Error: Approved count cannot exceed total applicants
+                  </div>
                 )}
               </div>
             ))}
@@ -283,38 +470,45 @@ const AuditForm = () => {
           <div className="manual-subsection">
             <h3>Zip Code</h3>
             {zipCodes.map((zip, index) => (
-              <div key={index} className="input-row">
-                <input
-                  type="text"
-                  placeholder="Zip code or area"
-                  value={zip.name}
-                  onChange={(e) => updateZipCode(index, 'name', e.target.value)}
-                  className="input-field input-name"
-                />
-                <input
-                  type="number"
-                  placeholder="Total"
-                  value={zip.total}
-                  onChange={(e) => updateZipCode(index, 'total', e.target.value)}
-                  className="input-field"
-                />
-                <input
-                  type="number"
-                  placeholder="Approved"
-                  value={zip.approved}
-                  onChange={(e) => updateZipCode(index, 'approved', e.target.value)}
-                  className="input-field"
-                />
-                <span className="rate-display">
-                  → {calculateRate(zip.approved, zip.total)}%
-                </span>
-                {zipCodes.length > 1 && (
-                  <button
-                    onClick={() => removeZipCode(index)}
-                    className="btn-delete"
-                  >
-                    ✕
-                  </button>
+              <div key={index}>
+                <div className="input-row">
+                  <input
+                    type="text"
+                    placeholder="Zip code or area"
+                    value={zip.name}
+                    onChange={(e) => updateZipCode(index, 'name', e.target.value)}
+                    className="input-field input-name"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Total"
+                    value={zip.total}
+                    onChange={(e) => updateZipCode(index, 'total', e.target.value)}
+                    className="input-field"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Approved"
+                    value={zip.approved}
+                    onChange={(e) => updateZipCode(index, 'approved', e.target.value)}
+                    className="input-field"
+                  />
+                  <span className="rate-display">
+                    → {calculateRate(zip.approved, zip.total)}%
+                  </span>
+                  {zipCodes.length > 1 && (
+                    <button
+                      onClick={() => removeZipCode(index)}
+                      className="btn-delete"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                {validationErrors.zipCodes[index] && (
+                  <div style={{ color: 'red', fontSize: '14px', marginLeft: '150px', marginTop: '5px', marginBottom: '10px' }}>
+                    Error: Approved count cannot exceed total applicants
+                  </div>
                 )}
               </div>
             ))}
@@ -325,7 +519,15 @@ const AuditForm = () => {
         </div>
 
         <div className="form-actions">
-          <button onClick={handleGenerateReport} className="btn-generate-report">
+          <button
+            onClick={handleGenerateReport}
+            className="btn-generate-report"
+            disabled={hasValidationErrors()}
+            style={{
+              opacity: hasValidationErrors() ? 0.5 : 1,
+              cursor: hasValidationErrors() ? 'not-allowed' : 'pointer'
+            }}
+          >
             📄 Generate Audit Report (PDF)
           </button>
         </div>

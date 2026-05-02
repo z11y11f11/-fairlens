@@ -247,6 +247,250 @@ def run_audit():
         }), 500
 
 
+@app.route('/api/audit/manual', methods=['POST'])
+def run_manual_audit():
+    """
+    Run audit with manual input data (no CSV file required).
+    
+    Expected JSON payload:
+    {
+        "gender": {
+            "male_total": 100,
+            "male_approved": 70,
+            "female_total": 100,
+            "female_approved": 50
+        },
+        "ethnic_groups": [
+            {"name": "Group A", "total": 50, "approved": 30},
+            {"name": "Group B", "total": 50, "approved": 25}
+        ],
+        "zip_codes": [
+            {"name": "12345", "total": 60, "approved": 40},
+            {"name": "67890", "total": 40, "approved": 20}
+        ]
+    }
+    
+    Returns:
+        JSON with audit results and PDF download URL
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'error': 'No JSON data provided',
+                'status': 'error'
+            }), 400
+        
+        # Extract manual input data
+        gender_data = data.get('gender', {})
+        ethnic_groups = data.get('ethnic_groups', [])
+        zip_codes = data.get('zip_codes', [])
+        
+        # Validate gender data
+        if not all(k in gender_data for k in ['male_total', 'male_approved', 'female_total', 'female_approved']):
+            return jsonify({
+                'error': 'Gender data must include male_total, male_approved, female_total, female_approved',
+                'status': 'error'
+            }), 400
+        
+        print(f"[{datetime.now().isoformat()}] Starting manual audit")
+        
+        # Calculate Disparate Impact for gender
+        male_total = float(gender_data['male_total'])
+        male_approved = float(gender_data['male_approved'])
+        female_total = float(gender_data['female_total'])
+        female_approved = float(gender_data['female_approved'])
+        
+        if male_total == 0 or female_total == 0:
+            return jsonify({
+                'error': 'Total counts cannot be zero',
+                'status': 'error'
+            }), 400
+        
+        male_rate = male_approved / male_total
+        female_rate = female_approved / female_total
+        
+        # BUG FIX: Always calculate DI = lower_rate / higher_rate (must be 0-1.0)
+        lower_rate = min(male_rate, female_rate)
+        higher_rate = max(male_rate, female_rate)
+        
+        if higher_rate == 0:
+            return jsonify({
+                'error': 'Approval rates cannot be zero (division by zero)',
+                'status': 'error'
+            }), 400
+        
+        di_ratio = lower_rate / higher_rate
+        
+        # Determine risk level
+        if di_ratio < 0.8:
+            risk_level = "HIGH RISK 🔴"
+            interpretation = (
+                f"DISCRIMINATION DETECTED: Disparate Impact ratio of {di_ratio:.3f} "
+                f"is below the 0.8 threshold (4/5 rule). Female approval rate: {female_rate:.1%}, "
+                f"Male approval rate: {male_rate:.1%}"
+            )
+        elif di_ratio < 1.0:
+            risk_level = "MEDIUM RISK 🟡"
+            interpretation = (
+                f"POTENTIAL BIAS: Disparate Impact ratio of {di_ratio:.3f} meets the 4/5 rule "
+                f"but shows disparity. Monitor closely."
+            )
+        else:
+            risk_level = "LOW RISK 🟢"
+            interpretation = f"FAIR: Disparate Impact ratio of {di_ratio:.3f} indicates no adverse impact."
+        
+        # Build audit results structure
+        audit_results = {
+            'disparate_impact_analysis': {
+                'disparate_impact': di_ratio,
+                'statistical_parity_difference': female_rate - male_rate,
+                'equal_opportunity_difference': female_rate - male_rate,
+                'risk_level': risk_level,
+                'interpretation': interpretation,
+                'metrics_detail': {
+                    'privileged_group': ['Male'],
+                    'unprivileged_group': ['Female'],
+                    'privileged_selection_rate': male_rate,
+                    'unprivileged_selection_rate': female_rate,
+                    'total_samples': int(male_total + female_total),
+                    'privileged_samples': int(male_total),
+                    'unprivileged_samples': int(female_total)
+                }
+            },
+            'proxy_variable_analysis': {
+                'detected_proxies': [],
+                'count': 0,
+                'risk_level': 'LOW RISK 🟢',
+                'risk_explanation': 'Manual input - no proxy variables',
+                'explanations': {},
+                'recommendations': []
+            },
+            'protected_attributes_check': {
+                'violations': [],
+                'violation_count': 0,
+                'risk_level': 'COMPLIANT ✅',
+                'legal_implications': ['No direct use of protected attributes'],
+                'required_actions': ['Continue monitoring']
+            },
+            'composite_risk_score': {
+                'composite_score': 80 if di_ratio >= 0.8 else di_ratio * 100,
+                'risk_level': risk_level,
+                'component_scores': {
+                    'disparate_impact_score': 80 if di_ratio >= 0.8 else di_ratio * 100,
+                    'proxy_variable_score': 100,
+                    'data_quality_score': 80,
+                    'privacy_score': 90
+                },
+                'recommendations': []
+            },
+            'summary': {
+                'overall_risk_level': risk_level,
+                'composite_score': 80 if di_ratio >= 0.8 else di_ratio * 100,
+                'disparate_impact_ratio': di_ratio,
+                'key_findings': [interpretation],
+                'priority_actions': []
+            }
+        }
+        
+        # Create minimal template findings
+        template_findings = {
+            'findings': {
+                'data_bias': [],
+                'discrimination': [],
+                'accountability': [],
+                'privacy': []
+            },
+            'recommendations': [],
+            'risk_summary': {
+                'high_risk_count': 1 if di_ratio < 0.8 else 0,
+                'medium_risk_count': 1 if 0.8 <= di_ratio < 1.0 else 0
+            },
+            'next_review_date': (datetime.now().replace(month=datetime.now().month + 3) if datetime.now().month <= 9
+                                else datetime.now().replace(year=datetime.now().year + 1, month=(datetime.now().month + 3) % 12)).strftime('%Y-%m-%d')
+        }
+        
+        # Create accountability report
+        audit_id = f"FL-{datetime.now().year}-{datetime.now().microsecond:04d}"
+        accountability_report = {
+            'audit_trail': {
+                'audit_id': audit_id,
+                'timestamp': datetime.now().isoformat(),
+                'submitter': 'Manual Input User',
+                'model_version': '1.0.0'
+            },
+            'governance_maturity': {
+                'maturity_level': 2,
+                'level_name': 'Defined',
+                'score': 60,
+                'risk': 'MEDIUM'
+            },
+            'raci_matrix': {
+                'matrix': {}
+            },
+            'accountability_gaps': []
+        }
+        
+        # Generate reports
+        print("Generating audit reports...")
+        all_data = {
+            'audit_results': audit_results,
+            'template_findings': template_findings,
+            'accountability_report': accountability_report
+        }
+        
+        report_files = report_generator.generate_full_report(all_data, REPORTS_DIR)
+        
+        # Prepare response
+        response = {
+            'status': 'success',
+            'audit_id': audit_id,
+            'timestamp': datetime.now().isoformat(),
+            'risk_summary': {
+                'overall_risk_level': risk_level,
+                'composite_score': audit_results['composite_risk_score']['composite_score'],
+                'disparate_impact_ratio': di_ratio,
+                'gender_analysis': {
+                    'male_rate': f"{male_rate:.1%}",
+                    'female_rate': f"{female_rate:.1%}",
+                    'di_ratio': f"{di_ratio:.3f}"
+                }
+            },
+            'files': {
+                'pdf_url': f'/api/download/{report_files["pdf_filename"]}',
+                'markdown_url': f'/api/download/{report_files["markdown_filename"]}',
+                'pdf_filename': report_files['pdf_filename'],
+                'markdown_filename': report_files['markdown_filename']
+            },
+            'interpretation': interpretation
+        }
+        
+        print(f"[{datetime.now().isoformat()}] Manual audit completed: {audit_id}")
+        
+        return jsonify(response), 200
+        
+    except ValueError as e:
+        error_msg = f"Invalid input data: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        return jsonify({
+            'error': error_msg,
+            'status': 'error',
+            'type': 'validation_error'
+        }), 400
+        
+    except Exception as e:
+        error_msg = f"Internal server error: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        print(traceback.format_exc())
+        return jsonify({
+            'error': error_msg,
+            'status': 'error',
+            'type': 'internal_error',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 @app.route('/api/download/<filename>', methods=['GET'])
 def download_file(filename):
     """

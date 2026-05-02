@@ -7,29 +7,23 @@ import os
 from datetime import datetime
 from typing import Dict, Any, List
 import markdown
-
-# Make weasyprint optional for PDF generation
-try:
-    from weasyprint import HTML, CSS
-    from weasyprint.text.fonts import FontConfiguration
-    WEASYPRINT_AVAILABLE = True
-except ImportError:
-    WEASYPRINT_AVAILABLE = False
-    print("Warning: weasyprint not available. PDF generation will be disabled.")
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 
 
 class AuditReportGenerator:
     """
     Generates comprehensive audit reports from bias detection and compliance results.
-    Outputs both Markdown and professionally styled PDF reports.
+    Outputs both Markdown and professionally styled PDF reports using reportlab.
     """
     
     def __init__(self):
         """Initialize the report generator."""
-        if WEASYPRINT_AVAILABLE:
-            self.font_config = FontConfiguration()
-        else:
-            self.font_config = None
+        pass
     
     def generate_markdown_report(
         self, 
@@ -305,174 +299,154 @@ class AuditReportGenerator:
     
     def convert_to_pdf(self, markdown_content: str, output_path: str):
         """
-        Convert Markdown content to professionally styled PDF.
+        Convert Markdown content to professionally styled PDF using reportlab.
         
         Args:
             markdown_content: Markdown report content
             output_path: Path where PDF should be saved
         
         Returns:
-            Path to generated PDF file or None if weasyprint not available
+            Path to generated PDF file
         """
-        if not WEASYPRINT_AVAILABLE:
-            print("Warning: weasyprint not available. Skipping PDF generation.")
-            return None
-        
-        # Convert Markdown to HTML
-        html_content = markdown.markdown(
-            markdown_content,
-            extensions=['tables', 'fenced_code', 'nl2br']
+        # Create PDF document
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=letter,
+            rightMargin=72,
+            leftMargin=72,
+            topMargin=72,
+            bottomMargin=72
         )
         
-        # Add professional CSS styling
-        css_style = """
-        @page {
-            size: A4;
-            margin: 2cm;
-            @top-center {
-                content: "FairLens AI Bias Audit Report";
-                font-size: 10pt;
-                color: #666;
-            }
-            @bottom-right {
-                content: "Page " counter(page) " of " counter(pages);
-                font-size: 9pt;
-                color: #666;
-            }
-        }
+        # Container for PDF elements
+        story = []
         
-        body {
-            font-family: 'Helvetica', 'Arial', sans-serif;
-            font-size: 11pt;
-            line-height: 1.6;
-            color: #333;
-            max-width: 100%;
-        }
+        # Define styles
+        styles = getSampleStyleSheet()
         
-        h1 {
-            color: #1e3a8a;
-            font-size: 24pt;
-            border-bottom: 3px solid #3b82f6;
-            padding-bottom: 10px;
-            margin-top: 0;
-            margin-bottom: 20px;
-        }
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#1e3a8a'),
+            spaceAfter=30,
+            alignment=TA_CENTER
+        )
         
-        h2 {
-            color: #1e40af;
-            font-size: 18pt;
-            margin-top: 30px;
-            margin-bottom: 15px;
-            border-bottom: 2px solid #93c5fd;
-            padding-bottom: 5px;
-        }
+        heading2_style = ParagraphStyle(
+            'CustomHeading2',
+            parent=styles['Heading2'],
+            fontSize=16,
+            textColor=colors.HexColor('#1e40af'),
+            spaceAfter=12,
+            spaceBefore=20
+        )
         
-        h3 {
-            color: #1e40af;
-            font-size: 14pt;
-            margin-top: 20px;
-            margin-bottom: 10px;
-        }
+        heading3_style = ParagraphStyle(
+            'CustomHeading3',
+            parent=styles['Heading3'],
+            fontSize=12,
+            textColor=colors.HexColor('#1e40af'),
+            spaceAfter=10,
+            spaceBefore=15
+        )
         
-        p {
-            margin-bottom: 10px;
-            text-align: justify;
-        }
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['BodyText'],
+            fontSize=10,
+            alignment=TA_JUSTIFY,
+            spaceAfter=12
+        )
         
-        strong {
-            color: #1f2937;
-        }
+        # Parse markdown content line by line
+        lines = markdown_content.split('\n')
+        i = 0
         
-        em {
-            color: #4b5563;
-        }
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Skip empty lines
+            if not line:
+                i += 1
+                continue
+            
+            # Title (# heading)
+            if line.startswith('# '):
+                text = line[2:].strip()
+                story.append(Paragraph(text, title_style))
+                story.append(Spacer(1, 12))
+            
+            # Heading 2 (## heading)
+            elif line.startswith('## '):
+                text = line[3:].strip()
+                story.append(Paragraph(text, heading2_style))
+            
+            # Heading 3 (### heading)
+            elif line.startswith('### '):
+                text = line[4:].strip()
+                story.append(Paragraph(text, heading3_style))
+            
+            # Horizontal rule
+            elif line.startswith('---'):
+                story.append(Spacer(1, 12))
+            
+            # Bold text with **
+            elif line.startswith('**') and line.endswith('**'):
+                text = line[2:-2]
+                story.append(Paragraph(f'<b>{text}</b>', body_style))
+            
+            # List items
+            elif line.startswith('- '):
+                text = line[2:].strip()
+                # Handle bold within list items - fix the replacement
+                import re
+                text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+                story.append(Paragraph(f'• {text}', body_style))
+            
+            # Table detection (simple)
+            elif line.startswith('|'):
+                # Collect table rows
+                table_data = []
+                while i < len(lines) and lines[i].strip().startswith('|'):
+                    row = [cell.strip() for cell in lines[i].strip().split('|')[1:-1]]
+                    table_data.append(row)
+                    i += 1
+                
+                if len(table_data) > 1:
+                    # Create table (skip separator row if present)
+                    if all(cell.replace('-', '').strip() == '' for cell in table_data[1]):
+                        table_data.pop(1)
+                    
+                    t = Table(table_data)
+                    t.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3b82f6')),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, 0), 10),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                    ]))
+                    story.append(t)
+                    story.append(Spacer(1, 12))
+                continue
+            
+            # Regular paragraph
+            else:
+                # Handle bold and italic with regex
+                import re
+                text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', line)
+                text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)
+                story.append(Paragraph(text, body_style))
+            
+            i += 1
         
-        ul, ol {
-            margin-left: 20px;
-            margin-bottom: 15px;
-        }
-        
-        li {
-            margin-bottom: 5px;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-            font-size: 10pt;
-        }
-        
-        th {
-            background-color: #3b82f6;
-            color: white;
-            padding: 10px;
-            text-align: left;
-            font-weight: bold;
-        }
-        
-        td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-        }
-        
-        tr:nth-child(even) {
-            background-color: #f9fafb;
-        }
-        
-        hr {
-            border: none;
-            border-top: 1px solid #d1d5db;
-            margin: 30px 0;
-        }
-        
-        code {
-            background-color: #f3f4f6;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
-            font-size: 10pt;
-        }
-        
-        .risk-high {
-            color: #dc2626;
-            font-weight: bold;
-        }
-        
-        .risk-medium {
-            color: #f59e0b;
-            font-weight: bold;
-        }
-        
-        .risk-low {
-            color: #10b981;
-            font-weight: bold;
-        }
-        """
-        
-        # Wrap HTML with proper structure
-        full_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>FairLens AI Bias Audit Report</title>
-        </head>
-        <body>
-            {html_content}
-        </body>
-        </html>
-        """
-        
-        # Generate PDF
-        if WEASYPRINT_AVAILABLE:
-            HTML(string=full_html).write_pdf(
-                output_path,
-                stylesheets=[CSS(string=css_style, font_config=self.font_config)],
-                font_config=self.font_config
-            )
-            return output_path
-        return None
+        # Build PDF
+        doc.build(story)
+        return output_path
     
     def generate_full_report(
         self,
