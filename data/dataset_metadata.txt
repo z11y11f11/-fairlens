@@ -1,0 +1,10 @@
+UCI Adult Dataset - Loan Approval Scenario
+==================================================
+
+train_records: 30162
+test_records: 15060
+features: 106
+target: loan_approved
+protected_attributes: ['sex', 'sex_binary', 'race', 'race_white']
+approval_rate_train: 0.24892248524633645
+approval_rate_test: 0.2456839309428951

@@ -1,0 +1,36 @@
+WARNING:root:No module named 'tensorflow': AdversarialDebiasing will be unavailable. To install, run:
+pip install 'aif360[AdversarialDebiasing]'
+WARNING:root:No module named 'tensorflow': AdversarialDebiasing will be unavailable. To install, run:
+pip install 'aif360[AdversarialDebiasing]'
+WARNING:root:No module named 'inFairness': SenSeI and SenSR will be unavailable. To install, run:
+pip install 'aif360[inFairness]'
+Warning: weasyprint not available. PDF generation will be disabled.
+============================================================
+FairLens AI Bias Audit API
+============================================================
+Reports directory: /Users/Qulei/Desktop/fairlens/backend/reports
+Starting server on http://localhost:5001
+Available endpoints:
+  GET  /api/health          - Health check
+  POST /api/audit           - Run bias audit
+  GET  /api/download/<file> - Download report
+  GET  /api/reports         - List all reports
+============================================================
+ * Serving Flask app 'app'
+ * Debug mode: on
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://192.168.1.19:5001
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug: * Restarting with stat
+WARNING:root:No module named 'tensorflow': AdversarialDebiasing will be unavailable. To install, run:
+pip install 'aif360[AdversarialDebiasing]'
+WARNING:root:No module named 'tensorflow': AdversarialDebiasing will be unavailable. To install, run:
+pip install 'aif360[AdversarialDebiasing]'
+WARNING:root:No module named 'inFairness': SenSeI and SenSR will be unavailable. To install, run:
+pip install 'aif360[inFairness]'
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 463-877-759
+INFO:werkzeug:127.0.0.1 - - [02/May/2026 23:41:45] "GET /api/health HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [02/May/2026 23:41:59] "GET /api/health HTTP/1.1" 200 -

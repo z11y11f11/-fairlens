@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""
+Generate demo audit report with real UCI data
+"""
+
+import sys
+import os
+from datetime import datetime
+
+# Add backend to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from audit.bias_detector import BiasDetector
+
+def generate_markdown_report(results):
+    """Generate markdown report from audit results"""
+    
+    di_analysis = results.get('disparate_impact_analysis', {})
+    proxy_analysis = results.get('proxy_variable_analysis', {})
+    protected_check = results.get('protected_attributes_check', {})
+    composite = results.get('composite_risk_score', {})
+    summary = results.get('summary', {})
+    
+    report = f"""# FairLens AI Bias Audit Report
+
+**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
+**Dataset:** UCI Adult Income Dataset (30,162 records)  
+**Model:** XGBoost Credit Scoring Model  
+**Protected Attribute:** Gender (sex_binary)
+
+---
+
+## Executive Summary
+
+**Overall Risk Level:** {summary.get('overall_risk_level', 'N/A')}  
+**Composite Risk Score:** {summary.get('composite_score', 0)}/100
+
+### Key Findings
+
+"""
+    
+    for finding in summary.get('key_findings', []):
+        report += f"- {finding}\n"
+    
+    report += f"""
+---
+
+## 1. Disparate Impact Analysis
+
+**Risk Level:** {di_analysis.get('risk_level', 'N/A')}  
+**Disparate Impact Ratio:** {di_analysis.get('disparate_impact', 0):.3f}  
+**Statistical Parity Difference:** {di_analysis.get('statistical_parity_difference', 0):.3f}
+
+### The 4/5 Rule (80% Rule)
+
+The 4/5 rule states that if the selection rate for a protected group is less than 80% of the selection rate for the privileged group, there is evidence of adverse impact/discrimination.
+
+**Threshold:** DI ≥ 0.8 (pass) | DI < 0.8 (fail - discrimination detected)
+
+### Results
+
+"""
+    
+    if 'metrics_detail' in di_analysis:
+        details = di_analysis['metrics_detail']
+        priv_rate = details.get('privileged_selection_rate', 0)
+        unpriv_rate = details.get('unprivileged_selection_rate', 0)
+        
+        report += f"""- **Privileged Group (Male):** {priv_rate:.1%} approval rate
+- **Unprivileged Group (Female):** {unpriv_rate:.1%} approval rate
+- **Disparate Impact Ratio:** {di_analysis.get('disparate_impact', 0):.3f}
+- **Total Samples:** {details.get('total_samples', 0):,}
+  - Privileged: {details.get('privileged_samples', 0):,}
+  - Unprivileged: {details.get('unprivileged_samples', 0):,}
+
+"""
+    
+    report += f"""### Interpretation
+
+{di_analysis.get('interpretation', 'No interpretation available')}
+
+---
+
+## 2. Proxy Variable Detection
+
+**Risk Level:** {proxy_analysis.get('risk_level', 'N/A')}  
+**Proxy Variables Detected:** {proxy_analysis.get('count', 0)}
+
+"""
+    
+    if proxy_analysis.get('detected_proxies'):
+        report += "### Detected Proxies\n\n"
+        for proxy in proxy_analysis['detected_proxies']:
+            explanation = proxy_analysis.get('explanations', {}).get(proxy, 'No explanation')
+            report += f"- **{proxy}:** {explanation}\n"
+    
+    report += f"""
+### Risk Assessment
+
+{proxy_analysis.get('risk_explanation', 'No risk explanation available')}
+
+---
+
+## 3. Protected Attributes Check
+
+**Risk Level:** {protected_check.get('risk_level', 'N/A')}  
+**Direct Violations:** {protected_check.get('violation_count', 0)}
+
+"""
+    
+    if protected_check.get('violations'):
+        report += "### Violations Found\n\n"
+        for violation in protected_check['violations']:
+            report += f"- **{violation['feature']}** (maps to {violation['protected_attribute']}) - {violation['severity']}\n"
+        
+        report += "\n### Legal Implications\n\n"
+        for implication in protected_check.get('legal_implications', []):
+            report += f"- {implication}\n"
+    
+    report += """
+---
+
+## 4. Composite Risk Score
+
+"""
+    
+    report += f"**Overall Score:** {composite.get('composite_score', 0)}/100  \n"
+    report += f"**Risk Level:** {composite.get('risk_level', 'N/A')}\n\n"
+    
+    if 'component_scores' in composite:
+        scores = composite['component_scores']
+        report += "### Component Scores\n\n"
+        report += f"- **Disparate Impact:** {scores.get('disparate_impact_score', 0):.1f}/100 (weight: 40%)\n"
+        report += f"- **Proxy Variables:** {scores.get('proxy_variable_score', 0):.1f}/100 (weight: 30%)\n"
+        report += f"- **Data Quality:** {scores.get('data_quality_score', 0):.1f}/100 (weight: 20%)\n"
+        report += f"- **Privacy:** {scores.get('privacy_score', 0):.1f}/100 (weight: 10%)\n"
+    
+    report += """
+---
+
+## 5. Priority Actions
+
+"""
+    
+    for i, action in enumerate(summary.get('priority_actions', []), 1):
+        report += f"{i}. {action}\n"
+    
+    report += """
+---
+
+## Recommendations
+
+"""
+    
+    for rec in composite.get('recommendations', []):
+        report += f"- {rec}\n"
+    
+    report += """
+---
+
+**Report Generated by FairLens AI Bias Audit System**  
+*Powered by IBM AI Fairness 360 (AIF360)*
+"""
+    
+    return report
+
+def main():
+    print("=" * 80)
+    print("Generating Demo Audit Report with Real UCI Data")
+    print("=" * 80)
+    print()
+    
+    # Initialize detector
+    detector = BiasDetector()
+    
+    # Prepare audit input
+    audit_input = {
+        'data_path': 'data/adult_train_processed.csv',
+        'protected_attribute': 'sex_binary',
+        'privileged_group': [1],  # Male = 1
+        'feature_list': [
+            'age', 'workclass', 'education', 'marital-status', 'occupation',
+            'relationship', 'race', 'sex', 'capital-gain', 'capital-loss',
+            'hours-per-week', 'native-country'
+        ],
+        'label_name': 'loan_approved',
+        'favorable_label': 1,
+        'data_quality_score': 0.85,
+        'privacy_score': 0.90
+    }
+    
+    print("Running full bias analysis...")
+    results = detector.run_full_analysis(audit_input)
+    
+    print("Generating markdown report...")
+    report = generate_markdown_report(results)
+    
+    # Save report
+    report_path = 'data/demo_audit_report.md'
+    with open(report_path, 'w') as f:
+        f.write(report)
+    
+    print(f"✓ Report saved to: {report_path}")
+    print()
+    
+    # Display key metrics
+    di_analysis = results.get('disparate_impact_analysis', {})
+    print("Key Metrics:")
+    print(f"  Disparate Impact: {di_analysis.get('disparate_impact', 0):.3f}")
+    print(f"  Risk Level: {di_analysis.get('risk_level', 'N/A')}")
+    print()
+    
+    print("=" * 80)
+    print("✓ Demo report generated successfully!")
+    print("=" * 80)
+    
+    return True
+
+if __name__ == "__main__":
+    success = main()
+    sys.exit(0 if success else 1)
+
+# Made with Bob

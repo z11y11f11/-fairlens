@@ -1,0 +1,38 @@
+{
+  "audit_id": "FL-2026-5478",
+  "files": {
+    "markdown_filename": "audit_report_FL-2026-5478_20260502_230256.md",
+    "markdown_url": "/api/download/audit_report_FL-2026-5478_20260502_230256.md",
+    "pdf_filename": "audit_report_FL-2026-5478_20260502_230256.pdf",
+    "pdf_url": "/api/download/audit_report_FL-2026-5478_20260502_230256.pdf"
+  },
+  "key_findings": [
+    "\ud83d\udea8 CRITICAL: 4 protected attributes used directly",
+    "\u26a0\ufe0f 2 proxy variables detected"
+  ],
+  "model_info": {
+    "name": "XGBoost Credit Scoring",
+    "type": "classification",
+    "use_case": "loan_approval",
+    "version": "1.0.0"
+  },
+  "priority_actions": [
+    "IMMEDIATE: Remove all protected attributes from feature set",
+    "URGENT: Retrain model without protected attributes",
+    "Review and potentially remove proxy variables",
+    "IMMEDIATE: Remove all protected attributes from model",
+    "URGENT: Halt model deployment if in production"
+  ],
+  "risk_summary": {
+    "composite_score": 0,
+    "direct_violations": 4,
+    "disparate_impact_ratio": null,
+    "governance_maturity": "Ad-hoc",
+    "high_risk_findings": 4,
+    "medium_risk_findings": 3,
+    "overall_risk_level": "CRITICAL VIOLATION \u26d4",
+    "proxy_variables_count": 2
+  },
+  "status": "success",
+  "timestamp": "2026-05-02T23:02:56.767016"
+}
