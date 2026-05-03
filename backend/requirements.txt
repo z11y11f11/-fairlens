@@ -20,6 +20,8 @@ seaborn==0.13.0
 # Report Generation
 markdown==3.5.1
 weasyprint==60.1
+reportlab==4.0.7
+PyPDF2==3.0.1
 
 # Utilities
 requests==2.31.0
